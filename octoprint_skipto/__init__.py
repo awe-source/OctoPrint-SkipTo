@@ -74,13 +74,13 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         # for details.
         return {
             "skipTo": {
-                "displayName": "skipTo",
+                "displayName": "SkipTo",
                 "displayVersion": self._plugin_version,
 
                 # version check: github repository
                 "type": "github_release",
                 "user": "awe-source",
-                "repo": "OctoPrint-skipTo",
+                "repo": "OctoPrint-SkipTo",
                 "current": self._plugin_version,
 
                 # update method: pip
