@@ -162,7 +162,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                 return flask.jsonify(success=False, error=f"Unknown file origin: {origin}"), 400
 
             file_path = self._file_manager.path_on_disk(destination, relative_path)
-            self._logger.info(f"Retrieved file path: {file_path}")
+            self._logger.debug(f"Retrieved file path: {file_path}")
 
         except Exception as e:
             self._logger.error(f"Error retrieving file: {str(e)}")
@@ -173,11 +173,9 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         try:
             if layer is not None:
                 layer = int(layer)
-                self._logger.info(f"Processing skip to layer: {layer}")
                 self._process_skipTo_gcode("layers", layer, file_path)
             elif z is not None:
                 z = float(z)
-                self._logger.info(f"Processing skip to Z height: {z}")
                 self._process_skipTo_gcode("z-height", z, file_path)
             else:
                 return flask.jsonify(success=False, error="Either layer or z value must be provided"), 400
@@ -201,7 +199,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         skip_reference_point  = 0
         comment = "no comment"
         
-        self._logger.info(f"this is the file {src_file_path}")
+        self._logger.debug(f"Processing skipto [{skip_mode}] to [{target}] on file: {src_file_path}")
 
         with open(src_file_path, "r") as file:
             lines = file.readlines()
