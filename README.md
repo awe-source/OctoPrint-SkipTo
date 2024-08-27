@@ -15,4 +15,6 @@ the plugin manager.
 
 ## Configuration
 
-**TODO:** Describe your plugin's configuration options (if any).
+Currently there's just three settings.
+Do you want to use a single file that is always the same name eg: "my_temp_layer_restart_file.gcode" or do you want each "skip" to be more detailed like "my fiddly model that I have to keep restarting by layer at layer40.gcode"
+Hopefully its self explanatory... otherwise let us know!
