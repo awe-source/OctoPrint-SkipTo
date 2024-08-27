@@ -1,0 +1,98 @@
+<!-- templates/settings_skipTo.jinja2 -->
+<div id="settings_plugin_skipTo" class="settingssection">
+    <h3>SkipTo Settings</h3>
+    <div class="alert alert-info" role="alert">
+        {{ _('<h4>Instructions:</h4>
+        <p>Choose the type of file that will be created:</p>
+        <ul>
+            <li>If you select <strong>Temp File</strong>, only one file will be made and it will be named <code>temp_filename.gcode</code> and the print will start immediately. This helps to avoid flooding the system with multiple temporary files.</li>
+            <li>If you do not check this option, the selected file will be processed and saved with the format <code>originalname+appendstring.gcode</code>. If you use tokens like <code>{mode}</code> and/or <code>{value}</code> in the append string, these values will be inserted into the string accordingly. The file will then be saved and loaded for printing.</li>
+        </ul>')|safe }}
+
+    </div>
+    <form class="form-horizontal" onsubmit="return false;"> 
+        <div class="control-group ">
+            <!-- Toggle Switch for 'Use Same Temp File' -->
+            <label class="control-label" for="use_tempfile">
+                {{ _('Use Temp File') }}
+                <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Check this to use the same temporary file for processing. (stops lots of files being added if you use this a lot) If unchecked then the Appending File String will be added to the filename') }}"></i>
+            </label>
+            <div class="controls ">
+                <label class="switch">
+                    <input type="checkbox" id="use_tempfile" data-bind="checked: settings.plugins.skipTo.use_tempfile">
+                </label>
+            </div>
+        </div>
+        
+        <!-- Temp File Name -->
+            <div class="control-group toggle-dependent" data-depends-on="#use_tempfile" data-depends-value="true">
+                <label class="control-label" for="temp_filename" >
+                    {{ _('Temp File Name') }}
+                    <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Enter the name of the temporary file to be used for processing. (if you check the above checkbox)') }}"></i>
+                </label>
+                <div class="controls">
+                    <input type="text" id="temp_filename" class="form-control" data-bind="value: settings.plugins.skipTo.temp_filename">
+                </div>
+            </div>
+        
+            <!-- Appending File String -->
+            <div class="control-group toggle-dependent" data-depends-on="#use_tempfile" data-depends-value="false">
+                <label class="control-label" for="appending_string">
+                    {{ _('Appending String') }}
+                    <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Specify the string to append to the file name for processed files. (if you don\'t check the box then it will create your file plus this string to the filename - you can use tags \"{mode}\" and \"{value}\") in that string') | e }}"></i>
+
+                    </label>
+                <div class="controls">
+                    <input type="text" id="appending_string" class="form-control" data-bind="value: settings.plugins.skipTo.appending_string">
+                </div>
+            </div>
+           
+    </form>
+</div>
+
+
+<style>
+    /* Custom Styles for Fields */
+ .control-group{
+ padding:10px;
+ }
+
+  .highlight {
+        border: 1px solid #ddd;
+        margin-top: 10px;
+        border-radius: 4px;
+        background-color: #b9d9ff;
+    }
+
+</style>
+
+
+<script>
+ document.addEventListener('DOMContentLoaded', function() {
+    
+        // Toggle dependent fields visibility
+        function toggleFields() {
+            var dependentFields = document.querySelectorAll('.toggle-dependent');
+            dependentFields.forEach(function(field) {
+                var dependsOnSelector = field.getAttribute('data-depends-on');
+                var dependsValue = field.getAttribute('data-depends-value') === 'true';
+
+                var dependsOnElement = document.querySelector(dependsOnSelector);
+                var isDependsOnChecked = dependsOnElement.checked;
+
+                if (isDependsOnChecked === dependsValue) {
+                    field.classList.add('highlight');
+                } else {
+                    field.classList.remove('highlight');
+                }
+            });
+        };
+
+        // Initialize visibility
+        toggleFields();
+
+        // Update visibility on toggle change
+       document.getElementById('use_tempfile').addEventListener('change', toggleFields);
+
+    });
+</script>

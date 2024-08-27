@@ -1,0 +1,105 @@
+<div id="gen_plugin_skipTo">
+    <!-- State Section -->
+    <div id="state-info" style="text-align: center;">
+
+        Layer #<span data-bind="text: layerCount"></span>
+
+
+        (Z= <span data-bind="text: zValue"></span>)
+        
+        <button id="state-skip-layers-button" class="btn"><i class="fas fa-forward"></i> Start Print At</button>
+    </div>
+
+    <!-- Popup Dialog -->
+    <div id="skip-layers-dialog" class="modal hide fade" tabindex="-1" role="dialog" data-backdrop="static" data-keyboard="false">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header custom-modal-header">
+                    <button type="button" class="close cancel-operation" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                    <h3 class="modal-title">Skip To</h3>
+                </div>
+                <div class="modal-body">
+
+                    <input id="skip_filepath" type="text" style="width: 100%;" value="goeshere" disabled>
+
+                    
+                    <div class="modal-form">
+                        <div class="form-group">
+                            <label for="skip_layer">Layer #:</label>
+                            <input type="number" id="skip_layer" class="input-xlarge" min="0" step="1"  />
+                            <span class="help-block">Enter the layer number to start printing.</span>
+                        </div>
+
+                        <!-- Divider with "OR" -->
+                        <div class="divider-with-or">OR</div>
+
+                        <div class="form-group">
+                            <label for="skip_z-height">Z Height:</label>
+                            <input  type="number" id="skip_z-height" class="input-xlarge" min="0" step="0.01" />
+                            <span class="help-block">Enter the Z-height (in whatever units is in the GCODE) to start printing.</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" id="start-button">Start</button>
+                    <button type="button" class="btn btn-secondary cancel-operation">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // JavaScript to handle clearing input boxes
+    document.getElementById('skip_layer').addEventListener('input', function() {
+        document.getElementById('skip_z-height').value = ''; // Clear Z-height input
+    });
+
+    document.getElementById('skip_z-height').addEventListener('input', function() {
+        document.getElementById('skip_layer').value = ''; // Clear Layer input
+    });
+</script>
+
+<style >
+    #skip-layers-dialog .custom-modal-header {
+        background-color: #d9edf7; /* Change to desired color */
+        color: #31708f; /* Text color */
+        border-bottom: 1px solid #bce8f1; /* Border color */
+    }
+    
+    #skip-layers-dialog .modal-body .modal-form {
+        display: flex;
+        flex-wrap: wrap;
+    }
+    
+    #skip-layers-dialog .modal-body .form-group {
+        flex: 1;
+        padding: 3px;
+        background-color: #e7f3fe; /* Light blue background similar to header */
+        border: 1px solid #bce8f1; /* Border color */
+        border-radius: 5px; /* Rounded corners */
+    }
+    
+    #skip-layers-dialog .modal-body .form-group:last-child {
+        margin-right: 0; /* Remove margin for the last item */
+    }
+    
+    #skip-layers-dialog .divider-with-or {
+        flex: 0 0 auto; /* Do not grow or shrink */
+        margin: 10px;
+
+        font-weight: bold;
+        font-size: 1.5em; /* Adjust size as needed */
+        color: #31708f; /* Same as header text color */
+        text-align: center;
+    }
+
+    #skip-layers-dialog .modal-body .input-xlarge {
+        width: 90%; /* Make input fields take full width of their container */
+    }
+    
+    
+</style>
+
+</div>
