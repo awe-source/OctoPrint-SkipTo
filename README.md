@@ -15,9 +15,6 @@ or manually using this URL:
 
     https://github.com/awe-source/OctoPrint-SkipTo/archive/master.zip
 
-**TODO:** Describe how to install your plugin, if more needs to be done than just installing it via pip or through
-the plugin manager.
-
 ## Configuration
 
 Currently there's just three settings.
