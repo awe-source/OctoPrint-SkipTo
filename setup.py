@@ -24,7 +24,7 @@ plugin_description = """Allows to skip printing to a specific layer or z-height 
 plugin_author = "awesrc"
 
 # The plugin's author's mail address.
-plugin_author_email = "you@example.com"
+plugin_author_email = "info@awesrc.com.au"
 
 # The plugin's homepage URL. Can be overwritten within OctoPrint's internal data via __plugin_url__ in the plugin module
 plugin_url = "https://github.com/awe-source/OctoPrint-SkipTo"
