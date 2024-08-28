@@ -1,15 +1,6 @@
 # coding=utf-8
 from __future__ import absolute_import
 
-### (Don't forget to remove me)
-# This is a basic skeleton for your plugin's __init__.py. You probably want to adjust the class name of your plugin
-# as well as the plugin mixins it's subclassing from. This is really just a basic skeleton to get you started,
-# defining your plugin as a template plugin, settings and asset plugin. Feel free to add or remove mixins
-# as necessary.
-#
-# Take a look at the documentation on what other plugin mixins are available.
-
-
 import octoprint.plugin
 import flask
 import json
@@ -22,8 +13,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                    octoprint.plugin.SettingsPlugin,
                    octoprint.plugin.AssetPlugin,
                    octoprint.plugin.TemplatePlugin,
-                   ##    octoprint.plugin.ProgressPlugin,
-                   octoprint.plugin.BlueprintPlugin, ##this is required otherwise all the routes get 404s...
+                   octoprint.plugin.BlueprintPlugin, 
                    octoprint.plugin.EventHandlerPlugin
                    ):
 
@@ -57,8 +47,6 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
     ##~~ AssetPlugin mixin
 
     def get_assets(self):
-        # Define your plugin's asset files to automatically include in the
-        # core UI here.
         self._logger.debug("Loading assets for skipTo Plugin")
         return {
             "js": ["js/skipTo.js"],
@@ -219,7 +207,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                 # OR greater than or equal to the desired layer/zheight
 
                 #TODO: If this is the "post home/pre layer1" z-move then 
-                # we PROBABLY need to move teh Z to be (a little? 20mm?) 
+                # we PROBABLY need to move the Z to be (a little? 20mm?) 
                 # above the FIRST Zheight we're going to approach 
                 # otehrwise the first move to print position could
                 # knock shit over... on tall/complex/broad base models...               
@@ -262,7 +250,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
 
     def _output_lines_to_new_file(self, src_file_path, lines, mode_description, target_value, comment):
         """
-        Writes modified GCODE lines to a new or temporary file and places that file in the queue.
+        Writes modified GCODE lines to a new or temporary file based on settings.
         """
         # Retrieve settings values with proper keys
         use_tempfile = self._settings.get(["use_tempfile"])
