@@ -37,7 +37,7 @@ $(function () {
             var z = $("#skip_z-height").val();
 
             OctoPrint.post(
-                "plugin/skipTo/skip_to",
+                "plugin/SkipTo/skip_to",
                 { filepath: filepath, layer: layer, z: z },
                 function (response) {
                     if (response.success) {
@@ -204,7 +204,7 @@ $(function () {
 
 
         self.onDataUpdaterPluginMessage = function (plugin, data) {
-            if (plugin !== "skipTo") {
+            if (plugin !== "SkipTo") {
                 return;
             }
 

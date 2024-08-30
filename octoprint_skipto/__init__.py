@@ -45,7 +45,6 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
      
  
     ##~~ AssetPlugin mixin
-
     def get_assets(self):
         self._logger.debug("Loading assets for skipTo Plugin")
         return {
@@ -55,7 +54,6 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         }
 
     ##~~ Softwareupdate hook
-
     def get_update_information(self):
         # Define the configuration for your plugin to use with the Software Update
         # Plugin here. See https://docs.octoprint.org/en/master/bundledplugins/softwareupdate.html
@@ -76,6 +74,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
             }
         }
 
+    ##~~ EventHandlerPlugin mixin
     def on_event(self, event, payload):
         self._logger.debug(f"got event {event} with payload {json.dumps(payload)}")
         
