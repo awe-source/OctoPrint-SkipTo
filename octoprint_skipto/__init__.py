@@ -193,7 +193,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
 
         return flask.jsonify(success=True)
 
-    def _is_float(value):
+    def _is_float(self, value):
         """Helper function to check if a value can be converted to float."""
         try:
             float(value)
@@ -251,7 +251,6 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                         new_lines.append(line)
 
         new_file_path = self._output_lines_to_new_file(src_file_path, new_lines, skip_mode, target, comment)
-        self._logger.info(f"Processing completed. Ready to output to {new_file_path}")
         
         # Queue the file for printing and start the print
         self._printer.select_file(new_file_path, self._isSdCardFile(new_file_path), True)
