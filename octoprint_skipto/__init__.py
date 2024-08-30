@@ -149,7 +149,10 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                 return flask.jsonify(success=False, error=f"Unknown file origin: {origin}"), 400
 
             file_path = self._file_manager.path_on_disk(destination, relative_path)
-            self._logger.debug(f"Retrieved file path: {file_path}")
+            self._logger.info(f"Retrieved file path: {file_path}")
+            # Normalize the path using os.path.normpath()
+            file_path = os.path.normpath(file_path)
+            self._logger.info(f"Normalized file path: {file_path}")
 
         except Exception as e:
             self._logger.error(f"Error retrieving file: {str(e)}")
@@ -186,7 +189,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         skip_reference_point  = 0
         comment = "no comment"
         
-        self._logger.debug(f"Processing skipto [{skip_mode}] to [{target}] on file: {src_file_path}")
+        self._logger.info(f"Processing skipto: [{skip_mode}] to [{target}] on file: {src_file_path}")
 
         with open(src_file_path, "r") as file:
             lines = file.readlines()
@@ -229,10 +232,11 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                         new_lines.append(line)
 
         new_file_path = self._output_lines_to_new_file(src_file_path, new_lines, skip_mode, target, comment)
+        self._logger.info(f"Processing completed. ready to output to {new_file_path}")
         
         # Queue the file for printing and start the print
         self._printer.select_file(new_file_path, self._isSdCardFile(new_file_path), True)
-
+        
         # Optionally send a plugin message about printing state
         self._plugin_manager.send_plugin_message(self._identifier, dict(message= f"{new_file_path} sent to printer..."))
        
@@ -244,7 +248,9 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         Returns:
             bool: True if the file path contains '/sdcard/', False otherwise.
         """
-        return "/sdcard/" in file_path
+        # Normalize path for cross-platform consistency
+        file_path = os.path.normpath(file_path)
+        return 'sdcard' in file_path.lower()
 
 
     def _output_lines_to_new_file(self, src_file_path, lines, mode_description, target_value, comment):
@@ -271,10 +277,11 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
 
         # Write the modified GCODE to a new or temporary file
         try:
+            self._logger.info(f"Skip {mode_description} to {target_value} complete. Modified GCODE will save to {new_file_path}. [{comment}]")
+
             with open(new_file_path, "w") as file:
                 file.writelines(lines)
 
-            self._logger.info(f"Skip {mode_description} to {target_value} complete. Modified GCODE saved to {new_file_path}. [{comment}]")
             return new_file_path
         except Exception as e:
             self._logger.error(f"Error writing GCODE to file: {str(e)}")
