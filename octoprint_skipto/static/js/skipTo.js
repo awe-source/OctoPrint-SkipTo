@@ -22,7 +22,6 @@ $(function () {
         self.temp_filename = ko.observable("notset");
         self.appending_string = ko.observable("notset");
 
-
         // Function to handle dialog open and button click
         self.openSkipLayersDialog = function (fileinfo) {
             // Update file name and open dialog
@@ -151,13 +150,30 @@ $(function () {
 
         };
 
+        // Function to check if the start button should be enabled
+        self.checkStartButtonState = function () {
+            var layerValue = parseInt($("#skip_layer").val(), 10);
+            var zValue = parseFloat($("#skip_z-height").val());
+        
+            if ((Number.isInteger(layerValue) && layerValue > 0) || (!isNaN(zValue) && zValue > 0)) {
+                $("#start-button").prop("disabled", false);
+            } else {
+                $("#start-button").prop("disabled", true);
+            }
+        };
+        
 
+        // Initialize modal input fields and set up event listeners
         self.initModal = function () {
             $("#skip-layers-dialog input[name='skip_file']").val("");//??
             $("#skip_layer").val("");
             $("#skip_z-height").val("");
-        };
+            $("#start-button").prop("disabled", true);
 
+            // Event listeners for input changes
+            $("#skip_layer").on("input", self.checkStartButtonState);
+            $("#skip_z-height").on("input", self.checkStartButtonState);
+        };
 
         // Relocate state info to the end of the STATE accordion
         self.setupUI = function () {
@@ -194,14 +210,13 @@ $(function () {
                 self.initModal();
             });
 
-
             setInterval(() => {
                 self.addButton();
                 self.updateButtonsState();
             }, 1500); // Continuously poll and add buttons if needed
 
-        }
-
+            self.initModal();
+        };
 
         self.onDataUpdaterPluginMessage = function (plugin, data) {
             if (plugin !== "SkipTo") {
@@ -230,12 +245,9 @@ $(function () {
                     }
                 });
             }
-
         };
 
-
         self.onStartupComplete = function () {
-
             self.setupUI();
         };
     }

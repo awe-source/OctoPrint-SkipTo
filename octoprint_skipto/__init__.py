@@ -161,11 +161,9 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         
         # Validate and process the input
         try:
-            if layer is not None:
-                layer = int(layer)
+            if layer is not None and int(layer) > 0:
                 self._process_skipTo_gcode("layers", layer, file_path)
-            elif z is not None:
-                z = float(z)
+            elif z is not None and float(z) > 0.0:
                 self._process_skipTo_gcode("z-height", z, file_path)
             else:
                 return flask.jsonify(success=False, error="Either layer or z value must be provided"), 400
