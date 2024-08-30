@@ -25,7 +25,7 @@ $(function () {
         // Function to handle dialog open and button click
         self.openSkipLayersDialog = function (fileinfo) {
             // Update file name and open dialog
-            $("#skip-layers-dialog input[id='skip_filepath']").val("/" + fileinfo.origin + "/" + fileinfo.path);
+            $("#skip-layers-dialog input[id='skip_filepath']").val("/" + decodeURIComponent(fileinfo.origin) + "/" + decodeURIComponent(fileinfo.path));
             $("#skip-layers-dialog").modal("show");
         };
 

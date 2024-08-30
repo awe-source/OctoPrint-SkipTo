@@ -7,7 +7,7 @@ import json
 import re
 import os
 from flask_babel import gettext as _
-
+import urllib.parse
 
 class SkipToPlugin(octoprint.plugin.StartupPlugin, 
                    octoprint.plugin.SettingsPlugin,
@@ -135,6 +135,14 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         if not filepath:
             return flask.jsonify(success=False, error="File path is required"), 400
 
+        # Decode URL-encoded filepath
+        try:
+            filepath = urllib.parse.unquote(filepath)
+        except Exception as e:
+            self._logger.error(f"Error decoding file path: {str(e)}")
+            return flask.jsonify(success=False, error=f"Could not decode file path: {str(e)}"), 400
+
+
         # Extract origin and path from the provided filepath
         try:
             origin, relative_path = filepath.strip('/').split('/', 1)
@@ -150,23 +158,31 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
 
             file_path = self._file_manager.path_on_disk(destination, relative_path)
             self._logger.info(f"Retrieved file path: {file_path}")
-            # Normalize the path using os.path.normpath()
-            file_path = os.path.normpath(file_path)
-            self._logger.info(f"Normalized file path: {file_path}")
+            
+            # Check if the file exists
+            if not os.path.exists(file_path):
+                self._logger.error(f"File does not exist: {file_path}")
+                return flask.jsonify(success=False, error="File does not exist"), 404
+
 
         except Exception as e:
-            self._logger.error(f"Error retrieving file: {str(e)}")
-            return flask.jsonify(success=False, error=f"Could not retrieve file: {str(e)}"), 500
+            self._logger.error(f"Error parsing filepath requested: {str(e)}")
+            return flask.jsonify(success=False, error=f"Could not parse filepath requested: {str(e)}"), 500
 
         
         # Validate and process the input
         try:
-            if layer is not None and int(layer) > 0:
-                self._process_skipTo_gcode("layers", layer, file_path)
-            elif z is not None and float(z) > 0.0:
-                self._process_skipTo_gcode("z-height", z, file_path)
+            # Default to 0 if layer or z is None or empty
+            layer_value = int(layer) if layer and layer.isdigit() else 0
+            z_value = float(z) if z and self._is_float(z) else 0.0
+
+            # Check if at least one of layer or z is valid
+            if layer_value > 0:
+                self._process_skipTo_gcode("layers", layer_value, file_path)
+            elif z_value > 0.0:
+                self._process_skipTo_gcode("z-height", z_value, file_path)
             else:
-                return flask.jsonify(success=False, error="Either layer or z value must be provided"), 400
+                return flask.jsonify(success=False, error="Either layer or z value must be provided and be greater than zero"), 400
         except ValueError as ve:
             self._logger.error(f"Invalid layer or z value: {str(ve)}")
             return flask.jsonify(success=False, error=f"Invalid layer or z value: {str(ve)}"), 400
@@ -174,9 +190,16 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
             self._logger.error(f"Error processing skip to gcode: {str(e)}")
             return flask.jsonify(success=False, error=f"Error processing request: {str(e)}"), 500
 
+
         return flask.jsonify(success=True)
 
-
+    def _is_float(value):
+        """Helper function to check if a value can be converted to float."""
+        try:
+            float(value)
+            return True
+        except ValueError:
+            return False
     ##############################################################################
 
     def _process_skipTo_gcode(self, skip_mode, target, src_file_path):
@@ -184,14 +207,19 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         new_lines = []
         current_layer = 0
         current_z = 0
-        skip_reference_point  = 0
+        skip_reference_point = 0
         comment = "no comment"
-        
+
+        # Convert target to the appropriate type based on skip_mode
+        if skip_mode == "layers":
+            target = int(target)  # Target should be an integer if skip_mode is "layers"
+        else:
+            target = float(target)  # Target should be a float if skip_mode is "z"
+
         self._logger.info(f"Processing skipto: [{skip_mode}] to [{target}] on file: {src_file_path}")
 
         with open(src_file_path, "r") as file:
             lines = file.readlines()
-
 
             for line in lines:
                 # Detect Z-height changes in G-code commands
@@ -203,22 +231,15 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                 elif ";LAYER" in line and not re.search(r";\s*(layer[\s_-](height|count))", line, re.IGNORECASE):
                     current_layer += 1
 
-                # Only add the line if it is BEFORE layer#1/z0+ 
+                # Only add the line if it is BEFORE layer#1/z0+
                 # OR greater than or equal to the desired layer/zheight
-
-                #TODO: If this is the "post home/pre layer1" z-move then 
-                # we PROBABLY need to move the Z to be (a little? 20mm?) 
-                # above the FIRST Zheight we're going to approach 
-                # otehrwise the first move to print position could
-                # knock shit over... on tall/complex/broad base models...               
-
                 comparison_value = current_layer if skip_mode == "layers" else current_z
-           
-                if current_layer<1  or comparison_value >= target:
+
+                if current_layer < 1 or comparison_value >= target:
                     new_lines.append(line)
                     if current_layer > 0:
                         if skip_reference_point == 0:
-                            if (skip_mode == "layers"):
+                            if skip_mode == "layers":
                                 skip_reference_point = current_z
                                 comment = f"REF Z-height {skip_reference_point}"
                             else:
@@ -230,13 +251,13 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                         new_lines.append(line)
 
         new_file_path = self._output_lines_to_new_file(src_file_path, new_lines, skip_mode, target, comment)
-        self._logger.info(f"Processing completed. ready to output to {new_file_path}")
+        self._logger.info(f"Processing completed. Ready to output to {new_file_path}")
         
         # Queue the file for printing and start the print
         self._printer.select_file(new_file_path, self._isSdCardFile(new_file_path), True)
         
         # Optionally send a plugin message about printing state
-        self._plugin_manager.send_plugin_message(self._identifier, dict(message= f"{new_file_path} sent to printer..."))
+        self._plugin_manager.send_plugin_message(self._identifier, dict(message=f"{new_file_path} sent to printer..."))
        
 
     def _isSdCardFile(self, file_path):

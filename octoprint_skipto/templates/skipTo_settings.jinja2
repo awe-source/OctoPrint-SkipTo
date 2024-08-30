@@ -88,11 +88,13 @@
             });
         };
 
-        // Initialize visibility
-        toggleFields();
+
 
         // Update visibility on toggle change
        document.getElementById('use_tempfile').addEventListener('change', toggleFields);
 
+        setTimeout(function() {
+            toggleFields();
+        }, 2000);
     });
 </script>
