@@ -235,6 +235,21 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
                 # OR greater than or equal to the desired layer/zheight
                 comparison_value = current_layer if skip_mode == "layers" else current_z
 
+
+                #TODO: If this is the "post home/pre layer1" z-move then 
+                # we PROBABLY need to move teh Z to be (a little? 20mm?) 
+                # above the FIRST Zheight we're going to approach 
+                # otehrwise the first move to print position could
+                # knock shit over... on tall/complex/broad base models...               
+
+
+                #TODO: If the user chooses a higher layer count than this model has
+                # maybe we should do it but return a message that basically this will
+                # do nothing are you sure you got your numbers right?!
+
+
+
+
                 if current_layer < 1 or comparison_value >= target:
                     new_lines.append(line)
                     if current_layer > 0:
