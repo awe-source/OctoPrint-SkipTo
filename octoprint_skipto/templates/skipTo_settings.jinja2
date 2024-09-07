@@ -25,28 +25,40 @@
         </div>
         
         <!-- Temp File Name -->
-            <div class="control-group toggle-dependent" data-depends-on="#use_tempfile" data-depends-value="true">
-                <label class="control-label" for="temp_filename" >
-                    {{ _('Temp File Name') }}
-                    <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Enter the name of the temporary file to be used for processing. (if you check the above checkbox)') }}"></i>
-                </label>
-                <div class="controls">
-                    <input type="text" id="temp_filename" class="form-control" data-bind="value: settings.plugins.SkipTo.temp_filename">
-                </div>
+        <div class="control-group toggle-dependent" data-depends-on="#use_tempfile" data-depends-value="true">
+            <label class="control-label" for="temp_filename" >
+                {{ _('Temp File Name') }}
+                <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Enter the name of the temporary file to be used for processing. (if you check the above checkbox)') }}"></i>
+            </label>
+            <div class="controls">
+                <input type="text" id="temp_filename" class="form-control" data-bind="value: settings.plugins.SkipTo.temp_filename">
             </div>
-        
-            <!-- Appending File String -->
-            <div class="control-group toggle-dependent" data-depends-on="#use_tempfile" data-depends-value="false">
-                <label class="control-label" for="appending_string">
-                    {{ _('Appending String') }}
-                    <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Specify the string to append to the file name for processed files. (if you don\'t check the box then it will create your file plus this string to the filename - you can use tags \"{mode}\" and \"{value}\") in that string') | e }}"></i>
+        </div>
+    
+        <!-- Appending File String -->
+        <div class="control-group toggle-dependent" data-depends-on="#use_tempfile" data-depends-value="false">
+            <label class="control-label" for="appending_string">
+                {{ _('Appending String') }}
+                <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Specify the string to append to the file name for processed files. (if you don\'t check the box then it will create your file plus this string to the filename - you can use tags \"{mode}\" and \"{value}\") in that string') | e }}"></i>
 
-                    </label>
-                <div class="controls">
-                    <input type="text" id="appending_string" class="form-control" data-bind="value: settings.plugins.SkipTo.appending_string">
-                </div>
+                </label>
+            <div class="controls">
+                <input type="text" id="appending_string" class="form-control" data-bind="value: settings.plugins.SkipTo.appending_string">
             </div>
-           
+        </div>
+        
+        <!-- Z Offset -->
+        <div class="control-group">
+            <label class="control-label" for="z_offset">
+                {{ _('Z Offset') }}
+                <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('Enter the Z offset value to adjust the height of the print head relative to the initial first layer - default is 5.0mm.') }}"></i>
+            </label>
+            <div class="controls">
+                <input type="number" id="z_offset" class="form-control" step="0.1" data-bind="value: settings.plugins.SkipTo.z_offset">
+            </div>
+        </div>
+        
+
     </form>
 </div>
 

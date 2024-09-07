@@ -34,10 +34,11 @@ $(function () {
             var filepath = $("#skip-layers-dialog input[id='skip_filepath']").val();
             var layer = $("#skip_layer").val();
             var z = $("#skip_z-height").val();
+            var start_print = $("#start_print_immediately").is(":checked"); // Get boolean value for checkbox
 
             OctoPrint.post(
                 "plugin/SkipTo/skip_to",
-                { filepath: filepath, layer: layer, z: z },
+                { filepath: filepath, layer: layer, z: z, start_print: start_print },
                 function (response) {
                     if (response.success) {
                         console.log("Successfully processed skipped layers.");
@@ -236,10 +237,10 @@ $(function () {
             // Display the message as a notification
             if (data.message) {
                 new PNotify({
-                    title: 'Plugin Notification',
+                    title: 'SKIPTO Plugin',
                     text: data.message,
-                    type: 'info',
-                    hide: true,
+                    type: data.type,
+                    hide: false,
                     buttons: {
                         sticker: false
                     }

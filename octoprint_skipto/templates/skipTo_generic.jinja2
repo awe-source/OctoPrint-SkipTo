@@ -41,6 +41,19 @@
                             <span class="help-block">Enter the Z-height (in whatever units is in the GCODE) to start printing.</span>
                         </div>
                     </div>
+                    
+                    <br/>
+
+                    <div class="form-group">
+                        <label for="start_print" class="control-label">
+                            <input type="checkbox" id="start_print">
+                            Print Immediately
+                        </label>
+                        <div class="help-block">
+                            <p>If checked, the file will be sent to the printer and the print will start; if unchecked, the file will be created and queued, but the print will not start.</p>
+                        </div>
+                    </div>
+
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-primary" id="start-button">Start</button>
