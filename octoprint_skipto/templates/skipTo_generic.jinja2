@@ -54,6 +54,18 @@
                         </div>
                     </div>
 
+                    <br/>
+
+                    <div class="form-group">
+                        <label for="skip_z_homing" class="control-label">
+                            <input type="checkbox" id="skip_z_homing">
+                            Disable Z-Homing
+                        </label>
+                        <div class="help-block">
+                            <p>This will rehome only the X and Y axes, skipping Z-homing. The assumption is that the Z-axis is stable and hasn't been disturbed. This allows the printer to retain the current Z-height (closer to 'restart' position) without performing a Z-homing operation (assuming its not been 'tweaked' then this should be stable on most machines).</p>
+                        </div>
+                    </div>
+
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-primary" id="start-button">Start</button>

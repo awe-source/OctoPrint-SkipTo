@@ -34,11 +34,12 @@ $(function () {
             var filepath = $("#skip-layers-dialog input[id='skip_filepath']").val();
             var layer = $("#skip_layer").val();
             var z = $("#skip_z-height").val();
-            var start_print = $("#start_print_immediately").is(":checked"); // Get boolean value for checkbox
+            var start_print = $("#start_print_immediately").is(":checked");
+            var disable_z_homing = $("#skip_z_homing").is(":checked");
 
             OctoPrint.post(
                 "plugin/SkipTo/skip_to",
-                { filepath: filepath, layer: layer, z: z, start_print: start_print },
+                { filepath: filepath, layer: layer, z: z, start_print: start_print, disable_z_homing: disable_z_homing },
                 function (response) {
                     if (response.success) {
                         console.log("Successfully processed skipped layers.");
@@ -169,6 +170,9 @@ $(function () {
             $("#skip-layers-dialog input[name='skip_file']").val("");//??
             $("#skip_layer").val("");
             $("#skip_z-height").val("");
+            $("#start_print").prop("checked", false);
+            $("#skip_z_homing").prop("checked", true);
+
             $("#start-button").prop("disabled", true);
 
             // Event listeners for input changes

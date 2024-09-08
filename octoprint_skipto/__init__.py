@@ -33,7 +33,8 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
             use_tempfile=False,
             temp_filename="skipTo_temp.gcode",
             appending_string="_skipTo_{mode}_{value}.gcode",
-            z_offset=5.0
+            z_offset=5.0,
+            ignore_init_movement=True,
         )
 
     
@@ -132,6 +133,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         layer = flask.request.form.get("layer", None)
         z = flask.request.form.get("z", None)
         start_print = flask.request.form.get("start_print", "false").lower() == "true" 
+        disable_z_homing = flask.request.form.get("disable_z_homing", "false").lower() == "true" 
 
         # Check if filepath is provided
         if not filepath:
@@ -180,9 +182,9 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
 
             # Check if at least one of layer or z is valid
             if layer_value > 0:
-                self._process_skipTo_gcode("layers", layer_value, file_path, start_print)
+                self._process_skipTo_gcode("layers", layer_value, file_path, start_print, disable_z_homing)
             elif z_value > 0.0:
-                self._process_skipTo_gcode("z-height", z_value, file_path, start_print)
+                self._process_skipTo_gcode("z-height", z_value, file_path, start_print, disable_z_homing)
             else:
                 return flask.jsonify(success=False, error="Either layer or z value must be provided and be greater than zero"), 400
         except ValueError as ve:
@@ -204,7 +206,7 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
             return False
     ##############################################################################
 
-    def _process_skipTo_gcode(self, skip_mode, target, src_file_path, start_print):
+    def _process_skipTo_gcode(self, skip_mode, target, src_file_path, start_print, disable_z_homing):
         # Read and modify GCODE to skip layers/zheight
         new_lines = []
         current_layer = 0
@@ -212,8 +214,10 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         skip_reference_point = 0
         comment = "no comment"
         mod_comment_inserted = False
-        
 
+        # Get the ignore_init_movement setting (default to True)
+        ignore_init_movement = self._settings.get(["ignore_init_movement"], merged=True) or True
+        
         # Convert target to the appropriate type based on skip_mode
         if skip_mode == "layers":
             target = int(target)  # Target should be an integer if skip_mode is "layers"
@@ -225,17 +229,15 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         with open(src_file_path, "r") as file:
             lines = file.readlines()
 
-            for line in lines:
-                # Add a comment at the top of the new file (but after the last of any "header" comment block lines)
+            for line_count, line in enumerate(lines, start=1):
+                # Add a comment at the top of the new file (after any "header" comment block lines)
                 if not mod_comment_inserted and not line.startswith(";"):
-                    # Once we hit the first non-comment line, insert the custom comment
-                    new_lines.append(f"; File modified by SKIPTO plugin to start printing at specified height {skip_mode} -> {target} \n")
+                    new_lines.append(f";Modified by SKIPTO plugin to start printing at {skip_mode} -> {target} \n")
                     mod_comment_inserted = True
-
                 
                 # Detect Z-height changes in G-code commands
-                if line.startswith("G") and "Z" in line:
-                    match = re.search(r"\sZ(\d+\.?\d+)", line)
+                if re.match(r"\s*G\d+\s+.*Z(\d+\.?\d*)", line):
+                    match = re.search(r"\s*Z(\d+\.?\d*)", line)
                     if match:
                         current_z = float(match.group(1))
                 # Check for layer markers
@@ -244,42 +246,54 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
 
                 comparison_value = current_layer if skip_mode == "layers" else current_z        
 
-                # Only add the line if it is BEFORE layer#1/z0+
-                # OR greater than or equal to the desired layer/zheight (or a comment...?)
+                if re.match(r"\s*G91", line):
+                    self._logger.warning(f"Relative positioning (G91) detected (line: {line_count}). The skip functionality may not work as expected.")
 
+                # Add the line if it is BEFORE layer#1/z0+ OR greater than or equal to the target layer/zheight
                 if current_layer < 1 or comparison_value >= target:
+                    
+                    # Skip G1 movement commands before layer 1 if ignore_init_movement is True
+                    if current_layer == 0 and ignore_init_movement:
+                        # Skip G-code lines that start with G1, G2, etc., but not G20 or G21 or G90 or G91 or
+                        if re.match(r"^\s*G\d+", line) and not re.match(r"^\s*(G20|G21|G90|G91)\s", line):
+                            continue  # Skip this line
 
-                    if current_layer > 0:
-                        if skip_reference_point == 0:
-                            #we have hit the reference point so set the "head height" appropriately
-                            modz = current_z + self._settings.get(["z_offset"])
-                            new_lines.append(f"G1 Z{modz} F120 ;move the platform appropriate for skipping layers")
-                            
-                            if skip_mode == "layers":
-                                skip_reference_point = current_z
-                                comment = f"REF Z-height {skip_reference_point}"
-                            else:
-                                skip_reference_point = current_layer
-                                comment = f"REF Layer {skip_reference_point}"
+                    elif current_layer > 0 and skip_reference_point == 0:
+                        # We have hit the reference point, so do homing and the "head height" appropriately
+
+                        # Insert homing G-code based on disable_z_homing flag
+                        if disable_z_homing:
+                            new_lines.append("G28 X Y ;Home X and Y axes only\n")
+                        else:
+                            new_lines.append("G28 ;Home all axes (X, Y, Z)\n")
+
+                        z_offset = self._settings.get(["z_offset"], merged=True) or 2.0
+                        modz = current_z + z_offset
+                        new_lines.append(f"G1 Z{modz} F120 ;offset platform Z for skipping layers \n")
+                        
+                        if skip_mode == "layers":
+                            skip_reference_point = current_z
+                            comment = f"REF Z-height {skip_reference_point}"
+                        else:
+                            skip_reference_point = current_layer
+                            comment = f"REF Layer {skip_reference_point}"
                                 
                     new_lines.append(line)
                 else:
                     # Filter out movement GCODE lines 
-                    if not re.match(r"^G\d+", line):
+                    if not re.match(r"^\s*G\d+", line):
                         new_lines.append(line)
 
-        
         if skip_reference_point == 0:
-            # Log a warning about the invalid target and include the last detected layer and Z-height
+            # Log a warning about invalid target and the last detected layer/Z-height
             self._logger.warning(f"Skipping failed: No valid layer or Z-height reached for target {target}. "
                                 f"Last detected layer: {current_layer}, Last detected Z-height: {current_z}. "
                                 "Check the input values or confirm the file format.")
 
-            # Send a plugin message to the user with the last detected layer and Z-height
             self._plugin_manager.send_plugin_message(self._identifier, dict(
                 type="warning",
                 message=(f"Skipping to {skip_mode}={target} will effectively do nothing. "
-                        f"Last detected layer in file: {current_layer}, last Z-height in file: {current_z}. "
+                        f"Last detected layer: {current_layer}, Z-height: {current_z}. "
                         "No GCODE modification performed. Please check the input values and try again.")
             ))
         else:
@@ -291,10 +305,9 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
             
             # Optionally send a plugin message about the print job
             self._plugin_manager.send_plugin_message(self._identifier, dict(
+                type="info",
                 message=f"{new_file_path} sent to printer... ({'and started' if start_print else 'but not started'})"
             ))
-
-       
 
     def _isSdCardFile(self, file_path):
         """

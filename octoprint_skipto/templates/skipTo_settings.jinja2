@@ -7,7 +7,14 @@
         <ul>
             <li>If you select <strong>Temp File</strong>, only one file will be made and it will be named <code>temp_filename.gcode</code> and the print will start immediately. This helps to avoid flooding the system with multiple temporary files.</li>
             <li>If you do not check this option, the selected file will be processed and saved with the format <code>originalname+appendstring.gcode</code>. If you use tokens like <code>{mode}</code> and/or <code>{value}</code> in the append string, these values will be inserted into the string accordingly. The file will then be saved and loaded for printing.</li>
-        </ul>')|safe }}
+        </ul>
+        <p><strong>Note:</strong> If your G-code file uses relative positioning (G91), the skip functionality may not work as expected. Relative positioning means that movements are relative to the current toolhead position, so setting an offset based on a fixed coordinate (such as layer number or Z-height) might not align with the actual print setup. Ensure that your G-code uses absolute positioning (G90) for consistent behavior with the skip functionality.</p>
+        <p>Additional Options:</p>
+        <ul>
+            <li><strong>Z Offset:</strong> Enter the Z offset value to adjust the height of the print head relative to the initial first layer. The default value is 5.0mm.</li>
+            <li><strong>Ignore All Initialization Movement:</strong> This setting will force skipping of all movement (including extruder) before layer 1. Printers or pre-config may use this to prime the extruder or check the level of the bed by extruding along it in some way. This is enabled by default.</li>
+        </ul>
+        ')|safe }}
 
     </div>
     <form class="form-horizontal" onsubmit="return false;"> 
@@ -58,6 +65,20 @@
             </div>
         </div>
         
+
+        <!-- Ignore all movement before Layer 1 -->
+        <div class="control-group">
+            <label class="control-label" for="ignore_init_movement">
+                {{ _('Ignore all initialisation movement') }}
+                <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('This setting will force skipping of all movement (including extruder) before layer 1. Printers or pre-config may use this to prime the extruder or check the level of the bed by extruding along it in some way. This is enabled by default.') }}"></i>
+            </label>
+            <div class="controls">
+                <input type="checkbox" id="ignore_init_movement" class="form-control" data-bind="checked: settings.plugins.SkipTo.ignore_init_movement" />
+            </div>
+        </div>
+
+        
+
 
     </form>
 </div>
