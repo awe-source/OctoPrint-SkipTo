@@ -34,7 +34,7 @@ $(function () {
             var filepath = $("#skip-layers-dialog input[id='skip_filepath']").val();
             var layer = $("#skip_layer").val();
             var z = $("#skip_z-height").val();
-            var start_print = $("#start_print_immediately").is(":checked");
+            var start_print = $("#start_print").is(":checked");
             var disable_z_homing = $("#skip_z_homing").is(":checked");
 
             OctoPrint.post(
