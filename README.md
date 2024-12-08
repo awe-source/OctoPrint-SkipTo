@@ -1,23 +1,49 @@
 # OctoPrint-SkipTo
 
-Adds buttons to the UI to allow the user to start/restart the print while skipping movement and extrustion processes in gcode.
-Effectively allowing to start/restart a print from a specifc layer or z-height without having to muck around wiht the GCODE file directly. If everythings working you may never want to use it, however when you need it...
+The **OctoPrint-SkipTo** plugin adds buttons to the UI to allow users to start/restart a print while skipping specific movement and extrusion processes in the GCODE. This feature allows you to resume prints from a specific layer or Z-height without the need to manually edit the GCODE file. When things go wrong mid-print or you need to restart from a specific point, SkipTo simplifies the process.
 
-Basically choose a file, press the button, choose a Z or Layer# to "goto" and it shoudl process the file, keeping the "temp and init" stuff, but removing all the movement and extrusion related stuff, up until the layer/height in question, and then it should resume everything "as is" from there.
-it then saves all this (either in a temp file, or a copy with a suffix appended) and loads that file to print immediately.
+Essentially, you choose a file, press the button, select a Z-height or Layer number to "skip to," and the plugin processes the file. It retains the "temperature and initialization" commands but removes all the movement and extrusion commands up to the specified layer or height, then resumes the print "as is" from that point onward. The modified GCODE is saved as a temporary file or with an appended suffix and can be printed immediately.
 
-I hope you find it useful!
+We hope you find it useful!
+
+## New Features & Enhancements
+
+### 1. **Improved Command Filtering**
+   - Skip logic now correctly filters out movement commands (e.g., `G1`, `G2`) before the print start, but retains critical positioning commands (`G20`, `G21`, `G90`, `G91`).
+   - Specific GCODE positioning commands like `G90` (absolute positioning) and `G91` (relative positioning) are preserved to ensure print consistency.
+
+### 2. **Warnings for Relative Positioning (`G91`)**
+   - The plugin now detects and logs a warning when `G91` (relative positioning) is encountered. This informs users that relative positioning may affect the skip functionality, helping to avoid unexpected behavior during print restarts.
+
+### 3. **Z-Height Handling Improvements**
+   - Improved detection of Z-height changes within GCODE, ensuring the correct height is set when resuming from the specified layer or height.
+
+### 4. **Custom Homing Commands**
+   - Users can now configure whether to perform full homing or partial homing (e.g., X and Y only) after skipping to the desired layer or height. This allows for greater control when resuming prints.
+
+### 5. **Z-Offset Configuration**
+   - A customizable Z-offset can now be applied when resuming a print after skipping layers or Z-heights, ensuring smoother transitions during restart.
+
+### 6. **File Naming Customization**
+   - As before, the plugin allows you to choose between using a single temporary file (e.g., `my_temp_layer_restart_file.gcode`) or more detailed file names that reflect the layer or Z-height skipped to (e.g., `my_fiddly_model_layer40_restart.gcode`).
+
+---
 
 ## Setup
 
 Install via the bundled [Plugin Manager](https://docs.octoprint.org/en/master/bundledplugins/pluginmanager.html)
 or manually using this URL:
 
-    https://github.com/awe-source/OctoPrint-SkipTo/archive/master.zip
+```
+https://github.com/awe-source/OctoPrint-SkipTo/archive/master.zip
+```
 
 ## Configuration
 
-Currently there's just three settings.
-"temp file name", "appending string" and a toggle between the two...
-Essentially, do you want to use a single file that is always the same name eg: "my_temp_layer_restart_file.gcode" or do you want each "skip" to be more detailed like "my fiddly model that I have to keep restarting by layer at layer40.gcode"
-Hopefully its self explanatory... otherwise let us know!
+In the settings menu, you can configure the following options:
+- **Temporary File Name**: Choose a default name for the modified GCODE file (e.g., `my_temp_layer_restart_file.gcode`).
+- **Appended Suffix**: Alternatively, enable detailed file names that include the skipped layer or Z-height, for example, `my_model_layer40_restart.gcode`.
+- **Z-Offset**: Specify an optional Z-offset to apply when resuming a print after skipping layers or Z-heights.
+- **Partial Homing**: Configure whether to perform full homing (`G28`) or just home the X and Y axes (`G28 X Y`) after skipping.
+
+These settings help you tailor the plugin to your needs, whether you want to keep things simple with a single temp file or prefer a more detailed naming structure for each skip operation.
