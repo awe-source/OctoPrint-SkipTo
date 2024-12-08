@@ -68,12 +68,14 @@
 
         <!-- Ignore all movement before Layer 1 -->
         <div class="control-group">
-            <label class="control-label" for="ignore_init_movement">
-                {{ _('Ignore all initialisation movement') }}
-                <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('This setting will force skipping of all movement (including extruder) before layer 1. Printers or pre-config may use this to prime the extruder or check the level of the bed by extruding along it in some way. This is enabled by default.') }}"></i>
+            <label class="control-label" for="ignore_init_gcodes">
+                {{ _('Ignore all initialisation operations that match') }}
+                <i class="fa fa-info-circle" data-toggle="tooltip" title="{{ _('This setting will force skipping of all operations that match the patterns before the initial layer - eg setup operations. Printers or pre-config may use this to prime the extruder or check the level of the bed by extruding along it in some way. These defaults are generic and so you can change them if your needs vary but hopefully generally a good start...') }}"></i>
             </label>
             <div class="controls">
-                <input type="checkbox" id="ignore_init_movement" class="form-control" data-bind="checked: settings.plugins.SkipTo.ignore_init_movement" />
+                <textarea id="ignore_init_gcodes" class="form-control" rows="4" 
+                        data-bind="value: settings.plugins.SkipTo.ignore_init_gcodes">
+                </textarea>
             </div>
         </div>
 

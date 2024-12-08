@@ -9,51 +9,51 @@ import os
 from flask_babel import gettext as _
 import urllib.parse
 
-class SkipToPlugin(octoprint.plugin.StartupPlugin, 
-                   octoprint.plugin.SettingsPlugin,
-                   octoprint.plugin.AssetPlugin,
-                   octoprint.plugin.TemplatePlugin,
-                   octoprint.plugin.BlueprintPlugin, 
-                   octoprint.plugin.EventHandlerPlugin
-                   ):
 
-        
-   ##~~ StartupPlugin mixin
+class SkipToPlugin(
+    octoprint.plugin.StartupPlugin,
+    octoprint.plugin.SettingsPlugin,
+    octoprint.plugin.AssetPlugin,
+    octoprint.plugin.TemplatePlugin,
+    octoprint.plugin.BlueprintPlugin,
+    octoprint.plugin.EventHandlerPlugin,
+):
+    ##~~ StartupPlugin mixin
     def on_startup(self, host, port):
-        self._logger.debug("skipToPlugin has started on %s:%s", host, port)
-    
-        self.zValue =None
-        self.layerCount =None
+        self._logger.debug("SkipTo Plugin has started on %s:%s", host, port)
+        self.z_value = None
+        self.layer_count = None
 
-    
-    
     ##~~ SettingsPlugin mixin
     def get_settings_defaults(self):
-        return dict(
-            use_tempfile=False,
-            temp_filename="skipTo_temp.gcode",
-            appending_string="_skipTo_{mode}_{value}.gcode",
-            z_offset=5.0,
-            ignore_init_movement=True,
-        )
+        return {
+            "use_tempfile": False,
+            "temp_filename": "skipTo_temp.gcode",
+            "appending_string": "_skipTo_{mode}{value}.gcode",
+            "z_offset": 5.0,
+            "ignore_init_gcodes": r"""G0|G1
+T\d+
+M84
+P0
+G29""",
+        }
 
-    
-    #~~ TemplatePlugin mixin
+    ##~~ TemplatePlugin mixin
     def get_template_configs(self):
         return [
-              dict(type="generic", template="skipTo_generic.jinja2", custom_bindings=True),
-              dict(type="settings", template="skipTo_settings.jinja2", custom_bindings=False)
+            {"type": "generic", "template": "skipTo_generic.jinja2", "custom_bindings": True},
+            {"type": "settings", "template": "skipTo_settings.jinja2", "custom_bindings": False},
         ]
-     
- 
+
     ##~~ AssetPlugin mixin
     def get_assets(self):
-        self._logger.debug("Loading assets for skipTo Plugin")
+        self._logger.debug("Loading assets for SkipTo Plugin")
         return {
             "js": ["js/skipTo.js"],
             "css": ["css/skipTo.css"],
-            "less": ["less/skipTo.less"]
+            "less": ["less/skipTo.less"],
         }
+
 
     ##~~ Softwareupdate hook
     def get_update_information(self):
@@ -78,124 +78,102 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
 
     ##~~ EventHandlerPlugin mixin
     def on_event(self, event, payload):
-        self._logger.debug(f"got event {event} with payload {json.dumps(payload)}")
-        
-        if event == "PrintStarted":
-            self.layerCount = None
-            self.zValue = None
-        
-        elif event == "Home":
-            self.zValue = None
-            self.layerCount = None
-        
+        self._logger.debug(f"Received event {event} with payload {json.dumps(payload)}")
+        if event == "PrintStarted" or event == "Home":
+            self.reset_tracking()
         elif event == "ZChange":
             self.on_z_change(payload)
 
+    def reset_tracking(self):
+        self.z_value = None
+        self.layer_count = None
 
     def on_z_change(self, payload):
+        # Define a minimum layer height to filter out irrelevant changes
+        MIN_LAYER_HEIGHT = 0.1  # Adjust based on your printer/slicer settings
 
-        self.zValue = payload.get('new')
-                    
-        if payload.get('old') is None:
-            # Assume this is layer #0: post home, pre base layer move
-            self.layerCount = 0
-            self._logger.info("Post home, pre-base layer move detected. Setting layer count to 0.")
-        elif self.zValue < payload.get('old', 0):
-            # Assume this is layer 1
-            self.layerCount = 1
-            self._logger.info("Base layer move detected. Setting layer count to 1.")
-        else:
-            # Increment layer count for subsequent layers
-            self.layerCount += 1
-            self._logger.info(f"Layer change detected. Incrementing layer count to {self.layerCount}.")
-        
-        # Send updated values to the frontend
-        self._plugin_manager.send_plugin_message(
-            self._identifier, 
-            {
-                "status": {
-                    "layerCount": self.layerCount,
-                    "zValue": self.zValue
-                }
-            }
-        )
+        try:
+            self.z_value = payload.get("new")
+            old_z_value = payload.get("old", None)  # Default to None for clarity
+
+            if old_z_value is None or self.z_value is None:  # Initial layer detection
+                self.layer_count = 0
+                self._logger.info("Initial Z detected, setting layer count to 0.")
+            elif self.z_value < old_z_value:  # Z dropped - potential probing or cleaning activity
+                self._logger.warning(
+                    f"Unexpected Z drop detected: old_z={old_z_value}, new_z={self.z_value}. Ignoring for layer counting."
+                )
+            elif abs(self.z_value - old_z_value) < MIN_LAYER_HEIGHT:  # Small Z changes
+                self._logger.debug(
+                    f"Z change below threshold ({MIN_LAYER_HEIGHT}mm): old_z={old_z_value}, new_z={self.z_value}. Ignoring."
+                )
+            else:  # Valid layer change
+                self.layer_count += 1
+                self._logger.info(f"Layer changed, incrementing to {self.layer_count}.")
+
+            # Send plugin message with updated layer and Z info
+            self._plugin_manager.send_plugin_message(
+                self._identifier,
+                {"status": {"layerCount": self.layer_count, "zValue": self.z_value}},
+            )
+        except Exception as e:
+            self._logger.error(f"Error handling Z change: {str(e)}")
+
 
     ##############################################################################
-    ## API methods        
-        
+    ##~~ API methods
+    ##############################################################################
+   
+       
     def is_blueprint_csrf_protected(self):
         return True
             
     # external api methods
     @octoprint.plugin.BlueprintPlugin.route("/skip_to", methods=["POST"])
     def skip_to(self):
-        filepath = flask.request.form.get("filepath", None)
-        layer = flask.request.form.get("layer", None)
-        z = flask.request.form.get("z", None)
-        start_print = flask.request.form.get("start_print", "false").lower() == "true" 
-        disable_z_homing = flask.request.form.get("disable_z_homing", "false").lower() == "true" 
-
-        # Check if filepath is provided
-        if not filepath:
-            return flask.jsonify(success=False, error="File path is required"), 400
-
-        # Decode URL-encoded filepath
         try:
-            filepath = urllib.parse.unquote(filepath)
-        except Exception as e:
-            self._logger.error(f"Error decoding file path: {str(e)}")
-            return flask.jsonify(success=False, error=f"Could not decode file path: {str(e)}"), 400
+            filepath = self._get_valid_filepath(flask.request.form.get("filepath"))
+            layer = flask.request.form.get("layer")
+            z = flask.request.form.get("z")
+            start_print = flask.request.form.get("start_print", "false").lower() == "true"
+            disable_z_homing = flask.request.form.get("disable_z_homing", "false").lower() == "true"
 
-
-        # Extract origin and path from the provided filepath
-        try:
-            origin, relative_path = filepath.strip('/').split('/', 1)
-
-            # Map origin to OctoPrint's FileDestinations
-            if origin == "local":
-                destination = octoprint.filemanager.FileDestinations.LOCAL
-            elif origin == "sdcard":
-                destination = octoprint.filemanager.FileDestinations.SDCARD
-            else:
-                self._logger.error(f"Unknown file origin: {origin}")
-                return flask.jsonify(success=False, error=f"Unknown file origin: {origin}"), 400
-
-            file_path = self._file_manager.path_on_disk(destination, relative_path)
-            self._logger.info(f"Retrieved file path: {file_path}")
-            
-            # Check if the file exists
-            if not os.path.exists(file_path):
-                self._logger.error(f"File does not exist: {file_path}")
-                return flask.jsonify(success=False, error="File does not exist"), 404
-
-
-        except Exception as e:
-            self._logger.error(f"Error parsing filepath requested: {str(e)}")
-            return flask.jsonify(success=False, error=f"Could not parse filepath requested: {str(e)}"), 500
-
-        
-        # Validate and process the input
-        try:
-            # Default to 0 if layer or z is None or empty
             layer_value = int(layer) if layer and layer.isdigit() else 0
             z_value = float(z) if z and self._is_float(z) else 0.0
 
-            # Check if at least one of layer or z is valid
             if layer_value > 0:
-                self._process_skipTo_gcode("layers", layer_value, file_path, start_print, disable_z_homing)
+                self._process_skip_to_gcode("L", layer_value, filepath, start_print, disable_z_homing)
             elif z_value > 0.0:
-                self._process_skipTo_gcode("z-height", z_value, file_path, start_print, disable_z_homing)
+                self._process_skip_to_gcode("Z", z_value, filepath, start_print, disable_z_homing)
             else:
-                return flask.jsonify(success=False, error="Either layer or z value must be provided and be greater than zero"), 400
+                return flask.jsonify(success=False, error="Invalid layer or Z value"), 400
+
+            return flask.jsonify(success=True)
         except ValueError as ve:
-            self._logger.error(f"Invalid layer or z value: {str(ve)}")
-            return flask.jsonify(success=False, error=f"Invalid layer or z value: {str(ve)}"), 400
+            self._logger.error(f"Value error: {str(ve)}")
+            return flask.jsonify(success=False, error=str(ve)), 400
         except Exception as e:
-            self._logger.error(f"Error processing skip to gcode: {str(e)}")
-            return flask.jsonify(success=False, error=f"Error processing request: {str(e)}"), 500
+            self._logger.error(f"Unexpected error: {str(e)}")
+            return flask.jsonify(success=False, error=str(e)), 500
+    
+    
+    def _get_valid_filepath(self, filepath):
+        if not filepath:
+            raise ValueError("File path is required")
+        try:
+            filepath = urllib.parse.unquote(filepath)
+            origin, relative_path = filepath.strip("/").split("/", 1)
+            destination = {"local": octoprint.filemanager.FileDestinations.LOCAL,
+                           "sdcard": octoprint.filemanager.FileDestinations.SDCARD}.get(origin)
+            if not destination:
+                raise ValueError(f"Unknown file origin: {origin}")
+            file_path = self._file_manager.path_on_disk(destination, relative_path)
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"File does not exist: {file_path}")
+            return file_path
+        except Exception as e:
+            raise ValueError(f"Invalid file path: {str(e)}")
 
-
-        return flask.jsonify(success=True)
 
     def _is_float(self, value):
         """Helper function to check if a value can be converted to float."""
@@ -206,112 +184,576 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
             return False
     ##############################################################################
 
-    def _process_skipTo_gcode(self, skip_mode, target, src_file_path, start_print, disable_z_homing):
+    def _skip_mode_description(self, skip_mode):
+        if skip_mode == "L":
+            return "layers"
+        elif skip_mode == "Z":
+            return "z-height"
+        else:
+            return "Unknown"
+
+    def _process_skip_to_gcode(self, skip_mode, target, src_file_path, start_print, disable_z_homing):
         # Read and modify GCODE to skip layers/zheight
-        new_lines = []
-        current_layer = 0
+        output_lines = []
+        skip_block = []
+        current_layer_buffer = []
+        
+        # This list will store the line numbers of detected relative positioning commands
+        relative_positioning_lines_detected = []
+
+        current_layer = 0 # 'pre' layer is 0 and first printing layer is 1 (because thats how the UI shows it)
         current_z = 0
         skip_reference_point = 0
-        comment = "no comment"
-        mod_comment_inserted = False
-
-        # Get the ignore_init_movement setting (default to True)
-        ignore_init_movement = self._settings.get(["ignore_init_movement"], merged=True) or True
+        comments = []
         
-        # Convert target to the appropriate type based on skip_mode
-        if skip_mode == "layers":
-            target = int(target)  # Target should be an integer if skip_mode is "layers"
-        else:
-            target = float(target)  # Target should be a float if skip_mode is "z"
+        tracked_state = {
+            "tool_change": [],  # e.g., ; CP TOOLCHANGE START \n.... OR a "nonmesh" block that contains a "^T\d+" operation
+            
+            ## this layer init is really just to get the "last z" value prior to the current layers "setup" and if its the same as the layer z then its the starting height
+            ## still not sure how to do this right and its mostly a cura thing, but could be any slicer really...
+            "layer_init": [],  # eg: ;MESH:NONMESH \n G0 F7200 X97.683 Y98.776 - a nonmesh block that has Z value (and perhaps NO TOOL opertionas - although perhaps it wont matter if a "tool change and a layer init" is insert twice...??)
 
-        self._logger.info(f"Processing skipto: [{skip_mode}] to [{target}] on file: {src_file_path}")
+            "bed_temp": None,
 
+            "fan_speed": None,
+
+            "layer_height": 0.0,  # Default or derived from metadata
+        }
+
+        self._logger.info(f"Processing skipto: [{self._skip_mode_description(skip_mode)}] to [{target}] on file: {src_file_path}")
+
+        target = self._convert_target(skip_mode, target)
+        first_marker_index = None
+        first_extrusion_found = False
+        
         with open(src_file_path, "r") as file:
             lines = file.readlines()
+            comparison_value = 0  # stores layer or z value for comparison to target
+            skip_reference_point = 0  # stores actual value upon resumption of layer output (layer or z value)
 
             for line_count, line in enumerate(lines, start=1):
-                # Add a comment at the top of the new file (after any "header" comment block lines)
-                if not mod_comment_inserted and not line.startswith(";"):
-                    new_lines.append(f";Modified by SKIPTO plugin to start printing at {skip_mode} -> {target} \n")
-                    mod_comment_inserted = True
+                # Detect Z height changes and layer shifts
+                (
+                    current_layer,
+                    current_z,
+                    layer_change_detected,
+                    first_marker_index,
+                    first_extrusion_found
+                ) = self._detect_z_height_and_layers(
+                    line,
+                    current_layer,
+                    current_z,
+                    first_marker_index,
+                    first_extrusion_found
+                )
                 
-                # Detect Z-height changes in G-code commands
-                if re.match(r"\s*G\d+\s+.*Z(\d+\.?\d*)", line):
-                    match = re.search(r"\s*Z(\d+\.?\d*)", line)
-                    if match:
-                        current_z = float(match.group(1))
-                # Check for layer markers
-                elif ";LAYER" in line and not re.search(r";\s*(layer[\s_-](height|count))", line, re.IGNORECASE):
-                    current_layer += 1
-
-                comparison_value = current_layer if skip_mode == "layers" else current_z        
-
-                if re.match(r"\s*G91", line):
-                    self._logger.warning(f"Relative positioning (G91) detected (line: {line_count}). The skip functionality may not work as expected.")
-
-                # Add the line if it is BEFORE layer#1/z0+ OR greater than or equal to the target layer/zheight
-                if current_layer < 1 or comparison_value >= target:
-                    
-                    # Skip G1 movement commands before layer 1 if ignore_init_movement is True
-                    if current_layer == 0 and ignore_init_movement:
-                        # Skip G-code lines that start with G1, G2, etc., but not G20 or G21 or G90 or G91 or
-                        if re.match(r"^\s*G\d+", line) and not re.match(r"^\s*(G20|G21|G90|G91)\s", line):
-                            continue  # Skip this line
-
-                    elif current_layer > 0 and skip_reference_point == 0:
-                        # We have hit the reference point, so do homing and the "head height" appropriately
-
-                        # Insert homing G-code based on disable_z_homing flag
-                        if disable_z_homing:
-                            new_lines.append("G28 X Y ;Home X and Y axes only\n")
-                        else:
-                            new_lines.append("G28 ;Home all axes (X, Y, Z)\n")
-
-                        z_offset = self._settings.get(["z_offset"], merged=True) or 2.0
-                        modz = current_z + z_offset
-                        new_lines.append(f"G1 Z{modz} F120 ;offset platform Z for skipping layers \n")
-                        
-                        if skip_mode == "layers":
-                            skip_reference_point = current_z
-                            comment = f"REF Z-height {skip_reference_point}"
-                        else:
-                            skip_reference_point = current_layer
-                            comment = f"REF Layer {skip_reference_point}"
-                                
-                    new_lines.append(line)
+                if layer_change_detected:
+                    skip_reference_point = self._evaluate_and_process_layer(
+                        current_layer_buffer,
+                        output_lines,
+                        skip_block,
+                        tracked_state,
+                        current_layer-1,
+                        current_z,
+                        skip_mode,
+                        target,
+                        comparison_value,
+                        skip_reference_point,
+                        disable_z_homing,
+                        start_print,
+                        comments
+                    )
+                    current_layer_buffer = []  # Reset the layer buffer
                 else:
-                    # Filter out movement GCODE lines 
-                    if not re.match(r"^\s*G\d+", line):
-                        new_lines.append(line)
+                    if current_layer > 0: # only track and compare once we are past the "setup/header" info
+                        comparison_value = current_layer if skip_mode == "L" else current_z
+                        if comparison_value < target:
+                            self._track_print_state(line, tracked_state)
+                        self._check_relative_positioning(relative_positioning_lines_detected, line, line_count)
+                    
+                current_layer_buffer.append(line)  # Add line to the current buffer
+
+            # Handle the remaining buffer after the 'lines' loop finishes
+            if current_layer_buffer:
+                current_layer += 1
+                skip_reference_point = self._evaluate_and_process_layer(
+                    current_layer_buffer,
+                    output_lines,
+                    skip_block,
+                    tracked_state,
+                    current_layer,
+                    current_z,
+                    skip_mode,
+                    target,
+                    comparison_value,
+                    skip_reference_point,
+                    disable_z_homing,
+                    start_print,
+                    comments
+                )
+
+        # After processing all lines, handle any results
+        if relative_positioning_lines_detected:
+            comments.append(f"Relative positioning (G91) detected (lines: {relative_positioning_lines_detected}).")
 
         if skip_reference_point == 0:
-            # Log a warning about invalid target and the last detected layer/Z-height
-            self._logger.warning(f"Skipping failed: No valid layer or Z-height reached for target {target}. "
-                                f"Last detected layer: {current_layer}, Last detected Z-height: {current_z}. "
-                                "Check the input values or confirm the file format.")
-
-            self._plugin_manager.send_plugin_message(self._identifier, dict(
-                type="warning",
-                message=(f"Skipping to {skip_mode}={target} will effectively do nothing. "
-                        f"Last detected layer: {current_layer}, Z-height: {current_z}. "
-                        "No GCODE modification performed. Please check the input values and try again.")
-            ))
+            self._handle_skipping_failure(target, current_layer, current_z)
         else:
-            # Write the new modified GCODE file
-            new_file_path = self._output_lines_to_new_file(src_file_path, new_lines, skip_mode, target, comment)
+            new_file_path = self._output_lines_to_new_file(src_file_path, output_lines, skip_mode, target, comments)
+            self._queue_file_for_printing(new_file_path, start_print)
+
+    ########################################################################
+    # Supporting functions
+    ########################################################################
+
+    def _track_print_state(self, line, tracked_state):
+        """
+        Tracks specific printer state information based on the provided line.
+        
+        Args:
+            line (str): The line of G-code to parse.
+            tracked_state (dict): The dictionary to store tracked state information.
+
+        Returns:
+            None: Updates the `tracked_state` dictionary in place.
+        """
+        # Static-like variables for block state
+        if not hasattr(self, "inBlock"):
+            self.inBlock = False
+        if not hasattr(self, "temp_block"):
+            self.temp_block = []
+        
+        isBlockFinalized = False
+        
+        # Check if currently in a block
+        if self.inBlock:
+            if re.search(r"^;(TIME|TYPE)|^; CP TOOLCHANGE END", line):  
+                self.inBlock = False
+                isBlockFinalized = True
+                if line.startswith("; CP TOOLCHANGE END"):
+                    self.temp_block.append(line)    
+            else:
+                self.temp_block.append(line)
+        else:
+            if re.search(r";MESH:NONMESH|; CP TOOLCHANGE START", line):  
+                self.temp_block.append(line)
+                self.inBlock = True
+
+        # Finalize block if end is detected
+        if isBlockFinalized:
+            # identify the collected block
+            block_type = self._analyse_block(
+                self.temp_block,
+            )
+            if block_type == "TOOLCHANGE":
+                tracked_state["tool_change"] = self.temp_block
+            elif block_type == "LAYERINIT":
+                tracked_state["layer_init"] = self.temp_block
+            else:
+                self._logger.error(f"Unknown block type {self.block_type}")    
             
-            # Queue the file for printing and start the print (if "start_print" is True)
-            self._printer.select_file(new_file_path, self._isSdCardFile(new_file_path), start_print)
-            
-            # Optionally send a plugin message about the print job
-            self._plugin_manager.send_plugin_message(self._identifier, dict(
-                type="info",
-                message=f"{new_file_path} sent to printer... ({'and started' if start_print else 'but not started'})"
+            self.temp_block = []  # Reset the block buffer
+
+        # Process single line if not in a block
+        if not self.inBlock:
+            # Track bed temperature changes
+            if "M140" in line or "M190" in line:  # Bed temperature commands
+                tracked_state["bed_temp"] = line
+
+            # Track fan speed
+            if "M106" in line:  # Fan speed commands
+                tracked_state["fan_speed"] = line
+
+            # Track layer height metadata (case-insensitive)
+            if layer_match := re.search(
+                r";LAYER[\s_-]?HEIGHT:\s*(\d+\.?\d*([eE][+-]?\d+)?)",  # Matches decimals and scientific notation
+                line,
+                re.IGNORECASE
+            ):
+                tracked_state["layer_height"] = float(layer_match.group(1))
+
+
+    def _analyse_block(self, block):
+        """
+        Analyzes a block of G-code to determine its type.
+        
+        Args:
+            block (list): A list of G-code lines representing a block.
+
+        Returns:
+            str: The type of the block ('TOOLCHANGE' or 'LAYERINIT').
+
+        Raises:
+            ValueError: If the block cannot be classified.
+        """
+        # Precompiled regex patterns
+        tool_change_pattern = re.compile(r"^\s*(T\d+|; CP TOOLCHANGE START)", re.IGNORECASE)
+        z_height_pattern = re.compile(r"^\s*G[01].*Z[-+]?\d*\.?\d+", re.IGNORECASE)
+
+        # Check for tool change operation
+        for line in block:
+            if tool_change_pattern.search(line):
+                return "TOOLCHANGE"
+
+        # Check for Z-height change
+        for line in block:
+            if z_height_pattern.search(line):
+                return "LAYERINIT"
+
+        # Log exception if block type cannot be determined
+        self._logger.error(f"Unable to classify block:\n{block}")
+        raise ValueError("Block cannot be classified as TOOLCHANGE or LAYERINIT.")
+
+
+    def _evaluate_and_process_layer(self, layer_buffer, output_lines, skip_block, tracked_state, layer_number, 
+                                    current_z, skip_mode, target, comparison_value, skip_reference_point, 
+                                    disable_z_homing, start_print_immediately, comments):
+        # Debugging print statements for all parameters TODO: remove this
+        self._logger.debug(
+            f"Evaluating layer:\n"
+            f"  layer_buffer_size={len(layer_buffer)}"
+            f"  layer_number={layer_number},\n"
+            f"  current_z={current_z},\n"
+            f"  skip_mode={skip_mode},\n"
+            f"  target={target},\n"
+            f"  comparison_value={comparison_value},\n"
+            f"  skip_reference_point={skip_reference_point},\n"
+        )
+        
+        if layer_number == 0:  # initial (pre-layers) operations
+            output_lines.extend(self._process_initialization_block(
+                layer_buffer,        
+                skip_mode,
+                target,
+                disable_z_homing,
+                start_print_immediately
             ))
 
+        elif comparison_value >= target:  # threshold reached
+            if skip_reference_point == 0.0:  # first layer to start, so add getting ready first
+                output_lines.extend(self._prepare_resume_state(tracked_state, current_z))
+                skip_reference_point = comparison_value
+                comments.append(f"REF {self._skip_mode_description(skip_mode)} - {skip_reference_point}")
+                output_lines.extend(skip_block)
+            
+            output_lines.extend(layer_buffer)
+
+        else:  # Skipped
+            # Collect all comment lines and metadata, extract Z values, and calculate average Z
+            layer_skip_output = []
+
+            metadata_stopped = False
+            # Define a pattern for lines to exclude
+            exclusions_pattern = r"(M117|G92)"
+
+            for line in layer_buffer:
+                command, _, _ = line.partition(';')
+                stripped_line = line.strip()
+                # Skip lines matching the exclusions pattern
+                if re.search(exclusions_pattern, stripped_line):
+                    continue  # Skip this line as if it doesn't exist
+
+                # Collect comments that start with ';' and stop at the first non-comment
+                if stripped_line.startswith(';'):
+                    # Replace "LAYER" with "<<SKIPPED>>LAYER" in the comment lines
+                    line = re.sub(r"LAYER", "<<SKIPPED>>LAYER", line, flags=re.IGNORECASE)
+                    layer_skip_output.append(line)
+                else:
+                    break  # Stop collecting metadata
+                    
+            # Construct the skip note with layer marker and metadata
+            layer_skip_output.append(f"    ; SKIPLAYER ({layer_number}) \n")
+            if layer_number< 5:
+                print(f"  Skip note: {layer_skip_output}")
+
+            # Append the skip note to output lines
+            skip_block.extend(layer_skip_output)
+        
+        return skip_reference_point
+
+
+
+    def _process_initialization_block(self, src_lines, skip_mode, target, disable_z_homing, start_print_immediately):
+        """
+        Processes the initialization block of G-code, modifying headers and filtering lines as needed.
+
+        Args:
+            src_lines (list): List of G-code lines to process.
+            skip_mode (str): The skip mode target.
+            target (str): The target value for skip mode.
+            disable_z_homing (bool): Whether to disable Z homing.
+            start_print_immediately (bool): Whether to start printing immediately.
+
+        Returns:
+            list: The processed G-code lines.
+        """
+        
+
+        # Extract settings
+        ignore_init_gcodes = (self._settings.get(["ignore_init_gcodes"]) or "").split("\n")
+
+        output_lines = []
+        header_lines = []
+        header_done = False
+
+        def filter_homing_command(line):
+            """Filter and modify G28 commands if Z homing is disabled."""
+            if re.match(r"^\s*G28", line):
+                # Extract the command part and the comment part
+                command_part, _, comment_part = line.partition(";")
+                command_part = command_part.strip()
+
+                # If Z homing is disabled, modify the command
+                if disable_z_homing:
+                    # Match G28 and any parameters (X, Y, Z) or none
+                    match = re.match(r"^\s*G28(?:\s*([XYZ0\s]*))?", command_part)
+                    if match:
+                        axes = match.group(1)
+                        
+                        # If no axes are specified, use "G28 X Y"
+                        if not axes.strip():
+                            command_part = "G28 X Y"
+                        else:
+                            # Remove "Z" or "Z0" from the axes
+                            axes = re.sub(r"Z0?\s*", "", axes)
+                            axes = " ".join(axes.split())  # Normalize spaces between remaining axes
+                            if not axes:
+                                return ""  # If no axes remain after Z removal, return empty line
+                            command_part = f"G28 {axes}"
+
+                        # Append a comment indicating Z homing removal
+                        return f"{command_part}   ;SKIPTO REMOVED Z HOMING    {comment_part}"
+
+            # Return the line unchanged if it's not a G28 or doesn't match criteria
+            return line
+
+        def filter_general_commands(line):
+            """Skip initial commands if there's a match on this line."""
+            command_part, _, comment_part = line.partition(";")
+            command_part = command_part.strip()
+            comment_part = comment_part.strip() if comment_part else ""
+        
+            if any(re.match(pattern, command_part) for pattern in ignore_init_gcodes):
+                exclusion_comment = f"    ;SKIPTO EXCLUSION -- {command_part}"
+                if comment_part:
+                    exclusion_comment += f" ; {comment_part}"
+                return exclusion_comment
+        
+            return line
+
+        filters = [filter_homing_command, filter_general_commands]
+
+        has_header_entry = False
+        has_header_finished = False
+
+        for line in src_lines:
+            stripped_line = line.strip()
+
+            if not header_done:
+                # Capture the first contiguous comment block as the header block
+                if (stripped_line.startswith(";") or stripped_line == "" ) and  not has_header_finished:
+                    header_lines.append(line)
+                    if stripped_line.startswith(";"):
+                        has_header_entry = True
+                    if has_header_entry and stripped_line== "":
+                        has_header_finished = True
+                    continue
+                else:
+                    # Header block is complete, output it plus the "modified by" info
+                    output_lines.extend(header_lines)
+                    output_lines.append("\n")
+
+                    # Insert the modified comment block
+                    output_lines.append(";Modified by SKIPTO plugin\n")
+                    output_lines.append(f"; Start printing at {self._skip_mode_description(skip_mode)} -> {target}\n")
+                    output_lines.append("; Options:\n")
+                    output_lines.append(f";   skip_mode : {skip_mode}\n")
+                    output_lines.append(f";   target : {target}\n")
+                    output_lines.append(f";   disable_z_homing : {disable_z_homing}\n")
+                    output_lines.append(f";   start_print_immediately : {start_print_immediately}\n")
+                    output_lines.append("; Settings:\n")
+                    try:
+                        default_setting_keys = self.get_settings_defaults().keys()
+                        for key in default_setting_keys:
+                            value = self._settings.get([key])
+                            if isinstance(value, str) and "\n" in value:
+                                value_lines = value.splitlines()
+                                output_lines.append(f";   {key} ==\n")
+                                for value_line in value_lines:
+                                    output_lines.append(f";       {value_line}\n")
+                            else:
+                                output_lines.append(f";   {key} == {value}\n")
+                    except Exception as e:
+                        self._logger.error(f"ERROR: Failed to retrieve settings: {e}")
+                        output_lines.append("; Failed to retrieve settings\n")
+                    output_lines.append("\n")
+                    header_done = True
+
+            # Apply filters to the line
+            for filter_func in filters:
+                line = filter_func(line)
+                if line is None:
+                    break
+            if line:
+                if not line.endswith('\n'):
+                    line += '\n'
+                output_lines.append(line)
+
+        return output_lines
+
+
+    def _prepare_resume_state(self, tracked_state, current_z):
+        z_offset = self._settings.get(["z_offset"]) or 2.0
+
+        """Construct commands for preparing the printer to resume."""
+        ready_lines = []
+        ready_lines.append("\n")
+        ready_lines.append("; READY STATE - BUILT BY SKIPTO PLUGIN\n")
+                
+
+        ready_lines.append("\n")
+        ready_lines.append(f";Offset platform Z for skipping layers \n")
+        ready_lines.append(f"G0 Z{current_z + z_offset} \n")
+        ready_lines.append("\n")
+        
+        
+        if tracked_state.get("bed_temp"):
+            ready_lines.append("; Restore bed temperature\n")
+            ready_lines.append(f"{tracked_state['bed_temp']}\n")
+            
+        if tracked_state.get("fan_speed"):
+            ready_lines.append(f"; Restore fan speed\n")
+            ready_lines.append(f"{tracked_state['fan_speed']}\n")
+
+
+        # Add lines from tool_change block if present
+        if tool_change_block := tracked_state.get("tool_change"):
+            ready_lines.append("; Tool change block\n")
+            for line in tool_change_block:
+                # Replace any Z value in the line with the updated Z value
+                updated_line = re.sub(
+                    r'\bZ([\d.]+)\b',  # Match Z followed by a number
+                    lambda match: f"Z{current_z + z_offset}",  # Replace with the updated Z value
+                    line
+                )
+                ready_lines.append(updated_line)  # Append the updated line
+            ready_lines.append("\n")
+
+
+
+        # Add lines from layer_init block if present - this must be last becasue of how some slicers are with the "last block" in teh previous layer
+        if layer_init_block := tracked_state.get("layer_init"):
+            ready_lines.append("; PREP_START\n")
+            ready_lines.extend(layer_init_block)  # Append all lines from the block
+            ready_lines.append("; PREP_END\n")
+            ready_lines.append("\n")
+
+        
+        return ready_lines
+
+
+    def _detect_z_height_and_layers(self, line, current_layer, current_z, first_marker_index, first_extrusion_found):
+        """
+        Detects changes in Z height and layers.
+
+        Args:
+            line (str): The current G-code line.
+            current_layer (int): The current layer number.
+            current_z (float): The current Z height.
+
+        Returns:
+            tuple: The updated layer number, updated Z height, and whether a layer change was detected.
+        """
+        # Patterns to detect layer changes for various slicers
+        layer_change_patterns = [
+            r";\s*LAYER[_\-\:\s]*(\d+|CHANGE)",  # CURA, ideaMaker, Simplify3D, Prusa
+            r";\s*(BEGIN|BEFORE)_LAYER_(OBJECT|CHANGE)",  # KISSlicer, Slic3r
+        ]
+        layer_change_detected = None
+        
+        if first_marker_index is None:
+            for idx, pattern in enumerate(layer_change_patterns):  # Use enumerate to get the index
+                if re.match(pattern, line, re.IGNORECASE):
+                    first_marker_index = idx
+                    layer_change_detected = True
+                    break  # Stop after match
+        else:
+            # If the first marker index is set, only check that pattern
+            if re.match(layer_change_patterns[first_marker_index], line, re.IGNORECASE):
+                layer_change_detected = True
+       
+        if layer_change_detected:
+            current_layer += 1
+            first_extrusion_found = False
+
+        # Detect Z height and store it as the "height" of this layer, stop storing it once extrusions start - assuming this is printing (may need to acocunt for tool operations or wipes)
+        if not first_extrusion_found:
+            line_without_comments = re.split(';', line, 1)[0].strip()
+            z_match = re.search(r"\s*Z(\d*\.?\d+)", line_without_comments)
+            
+            # collect any Z values
+            if z_match:
+                current_z = float(z_match.group(1)) 
+
+            # Detect E-codes (postive only)
+            e_match = re.search(r"\s*E(-?\d*\.?\d+)", line_without_comments)
+            if e_match:
+                new_e = float(e_match.group(1)) 
+                if new_e > 0.0:
+                    first_extrusion_found = True
+            
+        return current_layer, current_z, layer_change_detected, first_marker_index, first_extrusion_found 
+
+
+    def _convert_target(self, skip_mode, target):
+        """
+        Converts the target value to the appropriate type (int for layers, float otherwise).
+        
+        Args:
+            skip_mode (str): The skip mode ('L' or other).
+            target (str): The target value to convert.
+
+        Returns:
+            int or float: The converted target value.
+        """
+        return int(target) if skip_mode == "L" else float(target)
+
+
+
+    def _check_relative_positioning(self, relative_positioning_lines_detected, line, line_count):
+        if re.match(r"\s*G91", line):  # Match G91 command indicating relative positioning
+            relative_positioning_lines_detected.append(line_count)
+            
+
+    def _handle_skipping_failure(self, target, current_layer, current_z):
+        self._logger.warning(
+            f"Skipping failed: No valid layer or Z-height reached for target {target}. "
+            f"Last detected layer: {current_layer}, Z-height: {current_z}. "
+            "Check the input values or confirm the file format."
+        )
+        self._plugin_manager.send_plugin_message(self._identifier, {
+            "type": "warning",
+            "message": (
+                f"Skipping to target={target} failed. "
+                f"Last detected layer: {current_layer}, Z-height: {current_z}. "
+                "Please check input and try again."
+            )
+        })
+        
+        
+    def _queue_file_for_printing(self, new_file_path, start_print):
+        self._printer.select_file(new_file_path, self._isSdCardFile(new_file_path), start_print)
+        self._plugin_manager.send_plugin_message(self._identifier, {
+            "type": "info",
+            "message": f"{new_file_path} sent to printer... ({'and started' if start_print else 'but not started'})"
+        })
+    
+            
     def _isSdCardFile(self, file_path):
         """
         Check if the given file path is on the SD card.
+        
+        The check is case-insensitive and normalized for cross-platform consistency.
         
         Returns:
             bool: True if the file path contains '/sdcard/', False otherwise.
@@ -321,7 +763,36 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         return 'sdcard' in file_path.lower()
 
 
-    def _output_lines_to_new_file(self, src_file_path, lines, mode_description, target_value, comment):
+    def _generate_new_file_path(self, src_file_path, mode_description, target_value, use_tempfile, temp_filename, appending_string):
+        """
+        Generate the file path where the modified GCODE will be saved.
+        """
+        if use_tempfile:
+            # Ensure the temp file is always placed in the "local/root"
+            new_file_path = self._file_manager.path_on_disk(octoprint.filemanager.FileDestinations.LOCAL, temp_filename)
+        else:
+            # Remove trailing .gcode (case-insensitive)
+            src_file_base, _ = os.path.splitext(src_file_path)
+            
+            # Replace placeholders in the suffix
+            suffix = appending_string
+            suffix = re.sub(r"{mode}", str(mode_description), suffix)  # Replace {mode} if it exists
+            suffix = re.sub(r"{value}", str(target_value), suffix)  # Replace {value} if it exists
+            
+            # Ensure that the suffix isn't empty and is properly concatenated
+            if suffix:
+                new_file_path = src_file_base + suffix
+            else:
+                new_file_path = src_file_base + ".gcode"  # Ensure .gcode extension
+
+        # Ensure the filename ends with .gcode (even if suffix was added or temp filename used)
+        if not new_file_path.lower().endswith(".gcode"):
+            new_file_path += ".gcode"
+
+        return new_file_path
+
+
+    def _output_lines_to_new_file(self, src_file_path, lines, mode_description, target_value, comments):
         """
         Writes modified GCODE lines to a new or temporary file based on settings.
         """
@@ -330,22 +801,15 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         temp_filename = self._settings.get(["temp_filename"])
         appending_string = self._settings.get(["appending_string"])
 
-        if use_tempfile:
-            # Ensure the temp file is always placed in the "local/root"
-            new_file_path = self._file_manager.path_on_disk(octoprint.filemanager.FileDestinations.LOCAL, temp_filename)
-        else:
-            suffix = appending_string
-            # Remove trailing .gcode (case-insensitive)
-            src_file_base, _ = os.path.splitext(src_file_path)
-            
-            # Replace placeholders in the suffix
-            suffix = re.sub(r"{mode}", str(mode_description), suffix)  # Replace {mode} if it exists
-            suffix = re.sub(r"{value}", str(target_value), suffix)  # Replace {value} if it exists
-            new_file_path = src_file_base + suffix
+
+        # Generate the new file path using the helper function
+        new_file_path = self._generate_new_file_path(src_file_path, mode_description, target_value, use_tempfile, temp_filename, appending_string)
 
         # Write the modified GCODE to a new or temporary file
         try:
-            self._logger.info(f"Skip {mode_description} to {target_value} complete. Modified GCODE will save to {new_file_path}. [{comment}]")
+            self._logger.info(
+                f"Skip {mode_description} to {target_value} complete. Modified GCODE will save to {new_file_path}. {comments}"
+            )
 
             with open(new_file_path, "w") as file:
                 file.writelines(lines)
@@ -354,7 +818,9 @@ class SkipToPlugin(octoprint.plugin.StartupPlugin,
         except Exception as e:
             self._logger.error(f"Error writing GCODE to file: {str(e)}")
             raise
-        
+
+
+    ########################################################################
         
 
 # If you want your plugin to be registered within OctoPrint under a different name than what you defined in setup.py
