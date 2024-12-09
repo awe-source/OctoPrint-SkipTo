@@ -495,7 +495,7 @@ G29""",
             # Construct the skip note with layer marker and metadata
             layer_skip_output.append(f"    ; SKIPLAYER ({layer_number}) \n")
             #optionally add gcode so the layer isn't invisible
-            #layer_skip_output.append("G4 P0  ; Dwell for 0 milliseconds\n")
+            layer_skip_output.append("G4 P0  ; Dwell for 0 milliseconds - do nothing in skipped layer\n")
 
             # Append the skip note to output lines
             skip_block.extend(layer_skip_output)
@@ -686,7 +686,7 @@ G29""",
         # Add extrusion state if the mode is currently absolute
         if extrusion_mode.strip().startswith("M82"):
             last_extrusion = tracked_state.get("last_extrusion", 0.0)  # Default to 0.0 if not available
-            ready_lines.append(f"G92 E{last_extrusion}\n")  # Reset extruder position using G92
+            ready_lines.append(f"G92 E{last_extrusion}  ; SKIPTO extrusion initalization for absolute mode skipping\n")  # Reset extruder position using G92
             
  
         ready_lines.append("; PREP_END\n")
