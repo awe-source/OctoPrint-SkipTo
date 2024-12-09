@@ -202,8 +202,9 @@ G29""",
         relative_positioning_lines_detected = []
 
         current_layer = 0 # 'pre' layer is 0 and first printing layer is 1 (because thats how the UI shows it)
+        layer_z = 0
         current_z = 0
-        skip_reference_point = 0
+        skip_reference_point = 0.0
         comments = []
         
         tracked_state = {
@@ -214,7 +215,10 @@ G29""",
             "layer_init": [],  # eg: ;MESH:NONMESH \n G0 F7200 X97.683 Y98.776 - a nonmesh block that has Z value (and perhaps NO TOOL opertionas - although perhaps it wont matter if a "tool change and a layer init" is insert twice...??)
 
             "bed_temp": None,
-
+            
+            "extrusion_mode": None, # is it currently in M82(abs)/M83(rel) ... if so then A) need to set this in resume, and B) if its currently IN absolute then need to insert last known Extrusion state
+            "last_extrusion": 0.0,
+            
             "fan_speed": None,
 
             "layer_height": 0.0,  # Default or derived from metadata
@@ -235,6 +239,7 @@ G29""",
                 # Detect Z height changes and layer shifts
                 (
                     current_layer,
+                    layer_z,
                     current_z,
                     layer_change_detected,
                     first_marker_index,
@@ -242,6 +247,7 @@ G29""",
                 ) = self._detect_z_height_and_layers(
                     line,
                     current_layer,
+                    layer_z,
                     current_z,
                     first_marker_index,
                     first_extrusion_found
@@ -265,8 +271,12 @@ G29""",
                     )
                     current_layer_buffer = []  # Reset the layer buffer
                 else:
-                    if current_layer > 0: # only track and compare once we are past the "setup/header" info
-                        comparison_value = current_layer if skip_mode == "L" else current_z
+                    if current_layer == 0:  # Handle the "init" or "setup" layer specifically
+                        # Track M82 or M83 commands for extrusion mode in the init layer
+                        if "M82" in line or "M83" in line:
+                            self._track_print_state(line, tracked_state)
+                    elif current_layer > 0: # only track and compare once we are past the "setup/header" info
+                        comparison_value = current_layer if skip_mode == "L" else layer_z
                         if comparison_value < target:
                             self._track_print_state(line, tracked_state)
                         self._check_relative_positioning(relative_positioning_lines_detected, line, line_count)
@@ -323,54 +333,68 @@ G29""",
         if not hasattr(self, "temp_block"):
             self.temp_block = []
         
-        isBlockFinalized = False
-        
+
         # Check if currently in a block
         if self.inBlock:
+            # Check if block end is detected - TODO/NOTE:possibly "any comment" if the start is a "nonmesh"?? 
             if re.search(r"^;(TIME|TYPE)|^; CP TOOLCHANGE END", line):  
                 self.inBlock = False
-                isBlockFinalized = True
+
                 if line.startswith("; CP TOOLCHANGE END"):
-                    self.temp_block.append(line)    
+                    self.temp_block.append(line)
+
+                self._logger.debug(f"finish a block {self.temp_block}")
+
+                # Check if the block is empty (only comments, no commands)
+                if all(line.strip().startswith(";") for line in self.temp_block):
+                    # If the block contains only comments, discard it and log a warning
+                    self._logger.warning(f"Discarding empty block (all comments and no commands) {self.temp_block}")
+                else:
+                    # Identify the collected block
+                    block_type = self._analyse_block(self.temp_block)
+                    
+                    if block_type == "TOOLCHANGE":
+                        tracked_state["tool_change"] = self.temp_block
+                    elif block_type == "LAYERINIT":
+                        tracked_state["layer_init"] = self.temp_block
+                    else:
+                        self._logger.error(f"Unknown block type {self.block_type}")
+                    
+                self.temp_block = []  # Reset the block buffer
+                
             else:
                 self.temp_block.append(line)
         else:
             if re.search(r";MESH:NONMESH|; CP TOOLCHANGE START", line):  
                 self.temp_block.append(line)
                 self.inBlock = True
-
-        # Finalize block if end is detected
-        if isBlockFinalized:
-            # identify the collected block
-            block_type = self._analyse_block(
-                self.temp_block,
-            )
-            if block_type == "TOOLCHANGE":
-                tracked_state["tool_change"] = self.temp_block
-            elif block_type == "LAYERINIT":
-                tracked_state["layer_init"] = self.temp_block
             else:
-                self._logger.error(f"Unknown block type {self.block_type}")    
-            
-            self.temp_block = []  # Reset the block buffer
+                # Process single line if not in a block
+                command, _, comment = line.partition(";")
+                
+                # Track extrusion mode (absolute or relative)
+                if "M82" in line or "M83" in command:  
+                    tracked_state["extrusion_mode"] = line
 
-        # Process single line if not in a block
-        if not self.inBlock:
-            # Track bed temperature changes
-            if "M140" in line or "M190" in line:  # Bed temperature commands
-                tracked_state["bed_temp"] = line
+                # Track last extrusion value
+                if extrusion_match := re.search(r"\bE(-?\d*\.?\d+)", line):  # Matches "E" followed by a number
+                    tracked_state["last_extrusion"] = float(extrusion_match.group(1))
+                    
+                # Track bed temperature changes
+                if "M140" in line or "M190" in command:  # Extrusion mode
+                    tracked_state["bed_temp"] = line
 
-            # Track fan speed
-            if "M106" in line:  # Fan speed commands
-                tracked_state["fan_speed"] = line
+                # Track fan speed
+                if "M106" in command:  # Fan speed commands
+                    tracked_state["fan_speed"] = line
 
-            # Track layer height metadata (case-insensitive)
-            if layer_match := re.search(
-                r";LAYER[\s_-]?HEIGHT:\s*(\d+\.?\d*([eE][+-]?\d+)?)",  # Matches decimals and scientific notation
-                line,
-                re.IGNORECASE
-            ):
-                tracked_state["layer_height"] = float(layer_match.group(1))
+                # Track layer height metadata (case-insensitive)
+                if layer_match := re.search(
+                    r";LAYER[\s_-]?HEIGHT:\s*(\d+\.?\d*([eE][+-]?\d+)?)",  # Matches decimals and scientific notation
+                    line,
+                    re.IGNORECASE
+                ):
+                    tracked_state["layer_height"] = float(layer_match.group(1))
 
 
     def _analyse_block(self, block):
@@ -428,13 +452,20 @@ G29""",
                 disable_z_homing,
                 start_print_immediately
             ))
+            # add a warning if we've finished the initialization layer but haven't seen any extrusion mode default
+            if tracked_state["extrusion_mode"] is None:
+                self._logger.warning("No extrusion mode default found in the first layer.")
 
         elif comparison_value >= target:  # threshold reached
             if skip_reference_point == 0.0:  # first layer to start, so add getting ready first
                 output_lines.extend(self._prepare_resume_state(tracked_state, current_z))
                 skip_reference_point = comparison_value
+                self._logger.info(f"Found skipto {skip_mode}{skip_reference_point} - (first layer lines:{len(layer_buffer)}) - startswith:{layer_buffer[0]} ") 
                 comments.append(f"REF {self._skip_mode_description(skip_mode)} - {skip_reference_point}")
-                output_lines.extend(skip_block)
+                if True: # TODO: possibly make this configurable or user settable
+                    output_lines.extend(skip_block)
+                else:
+                    output_lines.append(f"    ; SKIPPED LAYERS TO  {self._skip_mode_description(skip_mode)} - {skip_reference_point} - DETAIL EXCLUDED")
             
             output_lines.extend(layer_buffer)
 
@@ -463,8 +494,8 @@ G29""",
                     
             # Construct the skip note with layer marker and metadata
             layer_skip_output.append(f"    ; SKIPLAYER ({layer_number}) \n")
-            if layer_number< 5:
-                print(f"  Skip note: {layer_skip_output}")
+            #optionally add gcode so the layer isn't invisible
+            #layer_skip_output.append("G4 P0  ; Dwell for 0 milliseconds\n")
 
             # Append the skip note to output lines
             skip_block.extend(layer_skip_output)
@@ -608,7 +639,8 @@ G29""",
         """Construct commands for preparing the printer to resume."""
         ready_lines = []
         ready_lines.append("\n")
-        ready_lines.append("; READY STATE - BUILT BY SKIPTO PLUGIN\n")
+        ready_lines.append("; PREP_START\n")
+        ready_lines.append("    ; READY STATE - BUILT BY SKIPTO PLUGIN\n")
                 
 
         ready_lines.append("\n")
@@ -643,16 +675,27 @@ G29""",
 
         # Add lines from layer_init block if present - this must be last becasue of how some slicers are with the "last block" in teh previous layer
         if layer_init_block := tracked_state.get("layer_init"):
-            ready_lines.append("; PREP_START\n")
             ready_lines.extend(layer_init_block)  # Append all lines from the block
-            ready_lines.append("; PREP_END\n")
-            ready_lines.append("\n")
 
+
+        # Append the extrusion_mode even if its redundant and then optional the extrusion state
+        ready_lines.append(f"; Restore extrusion status due to absolute mode\n")
+        extrusion_mode = tracked_state.get("extrusion_mode", "M82 ; SKIPTO default to relative extrusion mode")  # Default to M82 if not set, because this is the default for most printers, and some even default to this after tool changes, but hopefully most slicers explicitly set this...!?
+        ready_lines.append(f"{extrusion_mode}\n")
+
+        # Add extrusion state if the mode is currently absolute
+        if extrusion_mode.strip().startswith("M82"):
+            last_extrusion = tracked_state.get("last_extrusion", 0.0)  # Default to 0.0 if not available
+            ready_lines.append(f"G92 E{last_extrusion}\n")  # Reset extruder position using G92
+            
+ 
+        ready_lines.append("; PREP_END\n")
+        ready_lines.append("\n")
         
         return ready_lines
 
 
-    def _detect_z_height_and_layers(self, line, current_layer, current_z, first_marker_index, first_extrusion_found):
+    def _detect_z_height_and_layers(self, line, current_layer, layer_z, current_z, first_marker_index, first_extrusion_found):
         """
         Detects changes in Z height and layers.
 
@@ -684,25 +727,31 @@ G29""",
        
         if layer_change_detected:
             current_layer += 1
+            self._logger.debug(f"found layer marker {current_layer} (Z actual:{current_z} layer:{layer_z}) - {line} ")
             first_extrusion_found = False
 
         # Detect Z height and store it as the "height" of this layer, stop storing it once extrusions start - assuming this is printing (may need to acocunt for tool operations or wipes)
-        if not first_extrusion_found:
-            line_without_comments = re.split(';', line, 1)[0].strip()
-            z_match = re.search(r"\s*Z(\d*\.?\d+)", line_without_comments)
+        command,_,_ = line.strip().partition(';')
+        if command:
+
+            z_match = re.search(r"\s*Z(\d*\.?\d+)", command)
             
             # collect any Z values
             if z_match:
                 current_z = float(z_match.group(1)) 
 
-            # Detect E-codes (postive only)
-            e_match = re.search(r"\s*E(-?\d*\.?\d+)", line_without_comments)
-            if e_match:
-                new_e = float(e_match.group(1)) 
-                if new_e > 0.0:
-                    first_extrusion_found = True
-            
-        return current_layer, current_z, layer_change_detected, first_marker_index, first_extrusion_found 
+            if not first_extrusion_found:
+                # - look for first extrusion value - Detect E-codes (postive only)
+                e_match = re.search(r"\s*E(-?\d*\.?\d+)", command)
+                if e_match:
+                    new_e = float(e_match.group(1)) 
+                    # if first_extrusion_found then lock in the z height for this layer
+                    if new_e > 0.0:
+                        first_extrusion_found = True
+                        layer_z = current_z
+                        self._logger.debug(f"layer z set {layer_z}")
+                            
+        return current_layer, layer_z, current_z, layer_change_detected, first_marker_index, first_extrusion_found 
 
 
     def _convert_target(self, skip_mode, target):
