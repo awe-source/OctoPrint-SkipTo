@@ -1,13 +1,23 @@
 <div id="gen_plugin_skipTo" style="margin-top: 3px;">
     <!-- State Section -->
-    <div id="state-info" style="text-align: center;">
+    <div id="state-info" style="display: flex; justify-content: center; align-items: center; gap: 15px; text-align: center;">
 
-        Layer #<span data-bind="text: layerCount"></span>
-
-
-        (Z= <span data-bind="text: zValue"></span>)
-        
-        <button id="state-skip-layers-button" class="btn"><i class="fas fa-forward"></i> Start Print At</button>
+        <!-- Layer Info -->
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <span title="Current layer number">L#</span>: 
+            <strong id="layer-count" data-bind="text: layerCount" style="min-width: 30px; display: inline-block; text-align: right;">0</strong>
+        </div>
+    
+        <!-- Z Height -->
+        <div style="display: flex; align-items: center; gap: 5px;">
+            <span title="Current Z-height">Z</span>: 
+            <strong id="z-value" data-bind="text: zValue" style="min-width: 30px; display: inline-block; text-align: right;">0.00</strong>
+        </div>
+    
+        <!-- Skip Button -->
+        <button id="state-skip-layers-button" class="btn" style="white-space: nowrap;">
+            <i class="fas fa-forward"></i> SkipTo...
+        </button>
     </div>
 
     <!-- Popup Dialog -->
