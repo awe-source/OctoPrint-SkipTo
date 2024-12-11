@@ -377,7 +377,8 @@ G29""",
                     tracked_state["extrusion_mode"] = line
 
                 # Track last extrusion value
-                if extrusion_match := re.search(r"\bE(-?\d*\.?\d+)", line):  # Matches "E" followed by a number
+                extrusion_match = re.search(r"\bE(-?\d*\.?\d+)", line)  # Matches "E" followed by a number
+                if extrusion_match:
                     tracked_state["last_extrusion"] = float(extrusion_match.group(1))
                     
                 # Track bed temperature changes
@@ -389,11 +390,12 @@ G29""",
                     tracked_state["fan_speed"] = line
 
                 # Track layer height metadata (case-insensitive)
-                if layer_match := re.search(
+                layer_match = re.search(
                     r";LAYER[\s_-]?HEIGHT:\s*(\d+\.?\d*([eE][+-]?\d+)?)",  # Matches decimals and scientific notation
                     line,
                     re.IGNORECASE
-                ):
+                )
+                if layer_match:
                     tracked_state["layer_height"] = float(layer_match.group(1))
 
 
@@ -659,7 +661,8 @@ G29""",
 
 
         # Add lines from tool_change block if present
-        if tool_change_block := tracked_state.get("tool_change"):
+        tool_change_block = tracked_state.get("tool_change")
+        if tool_change_block:
             ready_lines.append("; Tool change block\n")
             for line in tool_change_block:
                 # Replace any Z value in the line with the updated Z value
@@ -674,7 +677,8 @@ G29""",
 
 
         # Add lines from layer_init block if present - this must be last becasue of how some slicers are with the "last block" in teh previous layer
-        if layer_init_block := tracked_state.get("layer_init"):
+        layer_init_block = tracked_state.get("layer_init")
+        if layer_init_block:
             ready_lines.extend(layer_init_block)  # Append all lines from the block
 
 
