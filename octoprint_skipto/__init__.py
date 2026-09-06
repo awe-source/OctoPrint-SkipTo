@@ -2,10 +2,13 @@
 from __future__ import absolute_import
 
 import octoprint.plugin
+import octoprint.filemanager
 import flask
+import bisect
 import json
 import re
 import os
+import threading
 from flask_babel import gettext as _
 import urllib.parse
 
@@ -23,6 +26,7 @@ class SkipToPlugin(
         self._logger.debug("SkipTo Plugin has started on %s:%s", host, port)
         self.z_value = None
         self.layer_count = None
+        self._reset_layer_map()
 
     ##~~ SettingsPlugin mixin
     def get_settings_defaults(self):
@@ -79,7 +83,10 @@ G29""",
     ##~~ EventHandlerPlugin mixin
     def on_event(self, event, payload):
         self._logger.debug(f"Received event {event} with payload {json.dumps(payload)}")
-        if event == "PrintStarted" or event == "Home":
+        if event == "PrintStarted":
+            self.reset_tracking()
+            self._start_layer_map_build(payload)
+        elif event == "Home":
             self.reset_tracking()
         elif event == "ZChange":
             self.on_z_change(payload)
@@ -87,6 +94,165 @@ G29""",
     def reset_tracking(self):
         self.z_value = None
         self.layer_count = None
+
+    ##~~ Layer table
+    #
+    # The Z reported by ZChange cannot tell a layer change apart from a Z-hop:
+    # both are an upward move larger than a layer height. Counting every rise
+    # inflates the layer number by one per travel move - a 110 layer print with
+    # retract_lift enabled reported 1838 layers.
+    #
+    # So instead we read the job's own layer markers once, using the same
+    # _detect_z_height_and_layers() the file rewriter already uses, and record
+    # the Z that each layer actually prints at. A live Z that is not in that
+    # table is not a layer, so Z-hops, probing and wipes are ignored by
+    # construction - and the number shown matches the number typed into
+    # "skip to layer N".
+    #
+    # One case Z alone still cannot resolve: when the hop is an exact multiple
+    # of the layer height (0.2mm layers with a 0.4mm lift), the hop lands on a
+    # real - but future - layer height. So we also record each marker's byte
+    # offset and cross-check against how far into the file we have streamed;
+    # a Z that claims a layer far from the file position is a hop, not a layer.
+
+    Z_MATCH_TOLERANCE = 0.05  # mm; upper bound on how close a live Z must be to a layer
+
+    def _reset_layer_map(self):
+        self._layer_map = None       # list of (z, layer_number), ascending by z
+        self._layer_heights = None   # the z values alone, for bisect
+        self._layer_offsets = None   # marker byte offsets, ascending (file order)
+        self._layer_at_offset = None # layer numbers parallel to _layer_offsets
+        self._z_tolerance = self.Z_MATCH_TOLERANCE
+
+    def _start_layer_map_build(self, payload):
+        """Kick off a background parse of the job's gcode to build the layer table."""
+        self._reset_layer_map()
+        try:
+            origin = payload.get("origin")
+            path = payload.get("path")
+            if origin != "local" or not path:
+                self._logger.info(
+                    f"No readable local file for this job (origin={origin}); "
+                    "falling back to Z-delta layer counting."
+                )
+                return
+            file_path = self._file_manager.path_on_disk(
+                octoprint.filemanager.FileDestinations.LOCAL, path
+            )
+            threading.Thread(
+                target=self._build_layer_map,
+                args=(file_path,),
+                name="SkipTo-layer-map",
+                daemon=True,
+            ).start()
+        except Exception as e:
+            self._logger.error(f"Could not start layer table build: {str(e)}")
+
+    def _build_layer_map(self, file_path):
+        """Parse file_path, recording where and at what Z each layer prints."""
+        try:
+            entries = []  # (layer_number, print z, byte offset of the marker)
+            current_layer = 0
+            layer_z = None
+            current_z = None
+            first_marker_index = None
+            first_extrusion_found = False
+            pending = None  # (layer_number, marker offset) awaiting its print Z
+            offset = 0
+
+            # Binary so the offsets match what OctoPrint reports as filepos.
+            with open(file_path, "rb") as handle:
+                for raw in handle:
+                    line = raw.decode("utf-8", errors="ignore")
+                    line_offset = offset
+                    offset += len(raw)
+                    (
+                        current_layer,
+                        layer_z,
+                        current_z,
+                        layer_change_detected,
+                        first_marker_index,
+                        first_extrusion_found,
+                    ) = self._detect_z_height_and_layers(
+                        line,
+                        current_layer,
+                        layer_z,
+                        current_z,
+                        first_marker_index,
+                        first_extrusion_found,
+                    )
+
+                    if layer_change_detected:
+                        # Marker seen - this layer's Z is wherever it first extrudes.
+                        pending = (current_layer, line_offset)
+                    elif (
+                        pending is not None
+                        and first_extrusion_found
+                        and layer_z is not None
+                    ):
+                        entries.append((pending[0], round(float(layer_z), 3), pending[1]))
+                        pending = None
+
+            if not entries:
+                self._logger.warning(
+                    f"No layer markers found in {os.path.basename(file_path)}; "
+                    "falling back to Z-delta layer counting."
+                )
+                return
+
+            by_z = sorted(((z, number) for number, z, _ in entries), key=lambda e: e[0])
+            heights = [entry[0] for entry in by_z]
+            # Keep the match window well inside the tightest layer spacing so a
+            # fine layer height cannot match its neighbour. Handles adaptive
+            # layer heights too, since it uses the smallest gap in the file.
+            gaps = [b - a for a, b in zip(heights, heights[1:]) if b > a]
+            tolerance = (
+                min(self.Z_MATCH_TOLERANCE, 0.4 * min(gaps)) if gaps else self.Z_MATCH_TOLERANCE
+            )
+            # Everything else must be visible before _layer_heights, which is
+            # what gates the lookup in on_z_change.
+            self._layer_map = by_z
+            self._layer_offsets = [entry[2] for entry in entries]
+            self._layer_at_offset = [entry[0] for entry in entries]
+            self._z_tolerance = tolerance
+            self._layer_heights = heights
+            self._logger.info(
+                f"Layer table built from {os.path.basename(file_path)}: "
+                f"{len(entries)} layers, Z {heights[0]} to {heights[-1]}, "
+                f"match tolerance {round(tolerance, 3)}mm."
+            )
+        except Exception as e:
+            self._logger.error(f"Failed to build layer table: {str(e)}")
+            self._reset_layer_map()
+
+    def _layer_for_z(self, z):
+        """Return the layer printed at height z, or None if z is not a layer height."""
+        heights = self._layer_heights
+        if not heights or z is None:
+            return None
+        index = bisect.bisect_left(heights, z)
+        best = None
+        for candidate in (index - 1, index):
+            if 0 <= candidate < len(heights):
+                delta = abs(heights[candidate] - z)
+                if delta <= self._z_tolerance and (best is None or delta < best[0]):
+                    best = (delta, self._layer_map[candidate][1])
+        return best[1] if best else None
+
+    def _layer_for_filepos(self):
+        """Layer implied by how far into the file OctoPrint has streamed, if known."""
+        offsets = self._layer_offsets
+        if not offsets:
+            return None
+        try:
+            data = self._printer.get_current_data() or {}
+            filepos = (data.get("progress") or {}).get("filepos")
+        except Exception:
+            return None
+        if not filepos:
+            return None
+        index = bisect.bisect_right(offsets, filepos) - 1
+        return self._layer_at_offset[index] if index >= 0 else None
 
     def on_z_change(self, payload):
         # Define a minimum layer height to filter out irrelevant changes
@@ -96,11 +262,31 @@ G29""",
             self.z_value = payload.get("new")
             old_z_value = payload.get("old", None)  # Default to None for clarity
 
-            if old_z_value is None or self.z_value is None:  # Initial layer detection
+            if self._layer_heights:  # Exact mode - driven by the job's layer markers
+                mapped_layer = self._layer_for_z(self.z_value)
+                if mapped_layer is not None:
+                    # A hop that lands on a real layer height always points well
+                    # ahead of what has actually been streamed, so trust the file
+                    # position whenever the two disagree by more than one layer.
+                    position_layer = self._layer_for_filepos()
+                    if position_layer is not None and abs(mapped_layer - position_layer) > 1:
+                        self._logger.debug(
+                            f"Z {self.z_value} maps to layer {mapped_layer} but the file "
+                            f"position says {position_layer}; treating it as a Z-hop."
+                        )
+                        mapped_layer = position_layer
+                if mapped_layer is None:
+                    self._logger.debug(
+                        f"Z {self.z_value} is not a layer height (Z-hop, probe or wipe). Ignoring."
+                    )
+                elif mapped_layer != self.layer_count:
+                    self.layer_count = mapped_layer
+                    self._logger.info(f"Layer changed to {self.layer_count} (Z={self.z_value}).")
+            elif old_z_value is None or self.z_value is None:  # Initial layer detection
                 self.layer_count = 0
                 self._logger.info("Initial Z detected, setting layer count to 0.")
             elif self.z_value < old_z_value:  # Z dropped - potential probing or cleaning activity
-                self._logger.warning(
+                self._logger.debug(
                     f"Unexpected Z drop detected: old_z={old_z_value}, new_z={self.z_value}. Ignoring for layer counting."
                 )
             elif abs(self.z_value - old_z_value) < MIN_LAYER_HEIGHT:  # Small Z changes
@@ -108,7 +294,7 @@ G29""",
                     f"Z change below threshold ({MIN_LAYER_HEIGHT}mm): old_z={old_z_value}, new_z={self.z_value}. Ignoring."
                 )
             else:  # Valid layer change
-                self.layer_count += 1
+                self.layer_count = (self.layer_count or 0) + 1
                 self._logger.info(f"Layer changed, incrementing to {self.layer_count}.")
 
             # Send plugin message with updated layer and Z info
