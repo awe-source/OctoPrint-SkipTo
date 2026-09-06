@@ -717,16 +717,26 @@ G29""",
             r";\s*(BEGIN|BEFORE)_LAYER_(OBJECT|CHANGE)",  # KISSlicer, Slic3r
         ]
         layer_change_detected = None
-        
-        if first_marker_index is None:
-            for idx, pattern in enumerate(layer_change_patterns):  # Use enumerate to get the index
+
+        # Lock onto the exact marker form this file uses, not just which pattern
+        # matched. The first pattern matches both ";LAYER_CHANGE" and ";LAYER:<n>",
+        # and PrusaSlicer emits both - which counted every layer twice, so a 110
+        # layer file numbered its layers 1, 3, 5 ... 219 and "skip to layer N"
+        # landed at roughly N/2. first_marker_index therefore now holds that form
+        # (e.g. "LAYER_CHANGE") rather than an index into layer_change_patterns.
+        marker_key = None
+        marker_match = re.match(r"\s*;\s*([A-Za-z_]*LAYER[A-Za-z_]*)", line)
+        if marker_match:
+            for pattern in layer_change_patterns:
                 if re.match(pattern, line, re.IGNORECASE):
-                    first_marker_index = idx
-                    layer_change_detected = True
-                    break  # Stop after match
-        else:
-            # If the first marker index is set, only check that pattern
-            if re.match(layer_change_patterns[first_marker_index], line, re.IGNORECASE):
+                    marker_key = marker_match.group(1).upper()
+                    break
+
+        if marker_key is not None:
+            if first_marker_index is None:
+                first_marker_index = marker_key
+                layer_change_detected = True
+            elif marker_key == first_marker_index:
                 layer_change_detected = True
        
         if layer_change_detected:
